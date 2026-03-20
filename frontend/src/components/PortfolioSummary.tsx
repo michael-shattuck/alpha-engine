@@ -131,9 +131,9 @@ export default function PortfolioSummary({ status }: Props) {
       <div className="rounded border border-gray-800 bg-gray-950/50 p-3">
         <div className="mb-2 text-[10px] uppercase tracking-wider text-gray-500">Verify On-Chain</div>
         <div className="flex flex-wrap gap-3 text-xs">
-          <a href={`https://app.orca.so/liquidity`} target="_blank" rel="noopener noreferrer"
+          <a href={`https://www.orca.so/pools`} target="_blank" rel="noopener noreferrer"
             className="text-blue-400 hover:text-blue-300 underline">
-            Orca Positions
+            Orca Pools
           </a>
           <a href={`https://solscan.io/account/${walletAddress}`} target="_blank" rel="noopener noreferrer"
             className="text-blue-400 hover:text-blue-300 underline">
