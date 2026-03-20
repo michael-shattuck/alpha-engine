@@ -65,6 +65,8 @@ class LeveragedLPStrategy(BaseStrategy):
         return (sum(r ** 2 for r in returns) / len(returns)) ** 0.5
 
     def _optimal_range(self) -> float:
+        if getattr(self, '_force_range', None):
+            return self._force_range
         vol = self._volatility()
         if vol < 0.005:
             return 0.02

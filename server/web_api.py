@@ -124,6 +124,18 @@ async def get_pools():
     return orchestrator.prices.get_best_pools(min_apy=20.0, limit=20)
 
 
+class ForceRangeRequest(BaseModel):
+    range_pct: float | None
+
+
+@app.post("/api/config/force-range")
+async def force_range(req: ForceRangeRequest):
+    for s in orchestrator.strategies.values():
+        if hasattr(s, '_force_range'):
+            s._force_range = req.range_pct
+    return {"ok": True, "force_range": req.range_pct}
+
+
 @app.get("/api/intelligence")
 async def get_intelligence():
     return {
