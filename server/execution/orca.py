@@ -522,6 +522,51 @@ class OrcaExecutor:
             "signature": signature,
         }
 
+    def _create_ata_ix(self, payer: Pubkey, owner: Pubkey, mint: Pubkey) -> Instruction:
+        ata = _derive_ata(owner, mint)
+        return Instruction(
+            program_id=ASSOCIATED_TOKEN_PROGRAM,
+            accounts=[
+                AccountMeta(pubkey=payer, is_signer=True, is_writable=True),
+                AccountMeta(pubkey=ata, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=owner, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=mint, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=SYSTEM_PROGRAM, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
+            ],
+            data=bytes(),
+        )
+
+    def _sync_native_ix(self, account: Pubkey) -> Instruction:
+        return Instruction(
+            program_id=TOKEN_PROGRAM,
+            accounts=[
+                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
+            ],
+            data=bytes([17]),
+        )
+
+    def _transfer_sol_ix(self, from_pk: Pubkey, to_pk: Pubkey, lamports: int) -> Instruction:
+        return Instruction(
+            program_id=SYSTEM_PROGRAM,
+            accounts=[
+                AccountMeta(pubkey=from_pk, is_signer=True, is_writable=True),
+                AccountMeta(pubkey=to_pk, is_signer=False, is_writable=True),
+            ],
+            data=struct.pack("<IQ", 2, lamports),
+        )
+
+    def _close_account_ix(self, account: Pubkey, dest: Pubkey, owner: Pubkey) -> Instruction:
+        return Instruction(
+            program_id=TOKEN_PROGRAM,
+            accounts=[
+                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=dest, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=owner, is_signer=True, is_writable=False),
+            ],
+            data=bytes([9]),
+        )
+
     async def swap(
         self,
         wallet: Keypair,
@@ -554,8 +599,24 @@ class OrcaExecutor:
 
         token_vault_a = Pubkey.from_string(pool_state["token_vault_a"])
         token_vault_b = Pubkey.from_string(pool_state["token_vault_b"])
-        owner_ata_a = _derive_ata(wallet.pubkey(), Pubkey.from_string(SOL_MINT))
-        owner_ata_b = _derive_ata(wallet.pubkey(), Pubkey.from_string(USDC_MINT))
+        sol_mint = Pubkey.from_string(SOL_MINT)
+        usdc_mint = Pubkey.from_string(USDC_MINT)
+        owner_ata_a = _derive_ata(wallet.pubkey(), sol_mint)
+        owner_ata_b = _derive_ata(wallet.pubkey(), usdc_mint)
+
+        pre_ixs = []
+
+        ata_a_resp = await self.rpc.get_account_info(owner_ata_a)
+        if not ata_a_resp.value:
+            pre_ixs.append(self._create_ata_ix(wallet.pubkey(), wallet.pubkey(), sol_mint))
+
+        if a_to_b:
+            pre_ixs.append(self._transfer_sol_ix(wallet.pubkey(), owner_ata_a, amount))
+            pre_ixs.append(self._sync_native_ix(owner_ata_a))
+
+        ata_b_resp = await self.rpc.get_account_info(owner_ata_b)
+        if not ata_b_resp.value:
+            pre_ixs.append(self._create_ata_ix(wallet.pubkey(), wallet.pubkey(), usdc_mint))
 
         tick_current = pool_state["tick"]
         ta0 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current, TICK_SPACING))
@@ -598,16 +659,21 @@ class OrcaExecutor:
             data=swap_data,
         )
 
+        post_ixs = []
+        if a_to_b:
+            post_ixs.append(self._close_account_ix(owner_ata_a, wallet.pubkey(), wallet.pubkey()))
+
+        all_ixs = [
+            set_compute_unit_limit(400_000),
+            set_compute_unit_price(50_000),
+        ] + pre_ixs + [swap_ix] + post_ixs
+
         blockhash_resp = await self.rpc.get_latest_blockhash()
         blockhash = blockhash_resp.value.blockhash
 
         msg = MessageV0.try_compile(
             payer=wallet.pubkey(),
-            instructions=[
-                set_compute_unit_limit(300_000),
-                set_compute_unit_price(50_000),
-                swap_ix,
-            ],
+            instructions=all_ixs,
             address_lookup_table_accounts=[],
             recent_blockhash=blockhash,
         )
