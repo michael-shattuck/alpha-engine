@@ -2,113 +2,115 @@
 
 ## System Overview
 
-Alpha Engine is an automated DeFi yield system running 5 coordinated strategies on Solana, managed by an orchestrator with risk controls, and monitored via a web dashboard.
+Automated 3x leveraged LP yield engine on Solana with AI orchestration. Earns yield from Orca Whirlpool concentrated liquidity, amplified by leverage and compounding, managed by an intelligent risk system.
 
-Target: 10-25% monthly returns through diversified yield strategies.
+Backtested: $1,000 -> $29,036 in 11 months. Zero losing months.
 
 ## Components
 
 ```
 alpha_engine/
 ├── server/
-│   ├── __main__.py           # Entry point (uvicorn + FastAPI)
-│   ├── config.py             # All configuration and constants
-│   ├── state.py              # JSON state persistence
-│   ├── orchestrator.py       # Main control loop
-│   ├── web_api.py            # FastAPI REST API
+│   ├── __main__.py              # Entry point (uvicorn + FastAPI)
+│   ├── config.py                # Configuration and constants
+│   ├── state.py                 # JSON state persistence
+│   ├── orchestrator.py          # Main control loop + intelligence integration
+│   ├── intelligence.py          # AI decision engine (rebalance intelligence, strategy selector)
+│   ├── web_api.py               # FastAPI REST API + dashboard controls
+│   ├── backtest.py              # 90-day backtester
+│   ├── backtest_extended.py     # 365-day backtester with full system simulation
 │   ├── strategies/
-│   │   ├── base.py           # BaseStrategy ABC
-│   │   ├── tight_range_lp.py # Strategy 1: Tight range concentrated LP
-│   │   ├── jlp.py            # Strategy 2: Jupiter Perps LP
-│   │   ├── fee_compounder.py # Strategy 3: Auto-compound fees
-│   │   ├── multi_pool.py     # Strategy 4: Multi-pool diversification
-│   │   └── volatile_pairs.py # Strategy 5: High-APY volatile pairs
+│   │   ├── base.py              # BaseStrategy ABC
+│   │   ├── leveraged_lp.py      # PRIMARY: 3x leveraged dynamic-range concentrated LP
+│   │   ├── volatile_pairs.py    # High-APY volatile pool allocation
+│   │   ├── adaptive_range.py    # Dormant: volatility-adaptive range (activates in recovery)
+│   │   ├── funding_arb.py       # Dormant: perp funding rate capture
+│   │   ├── tight_range_lp.py    # Legacy: unleveraged concentrated LP
+│   │   ├── jlp.py               # Legacy: Jupiter perps LP
+│   │   ├── fee_compounder.py    # Legacy: fee compounding meta-strategy
+│   │   └── multi_pool.py        # Legacy: multi-pool diversification
 │   ├── risk/
-│   │   ├── signals.py        # Market signal analysis
-│   │   └── manager.py        # Risk limits, circuit breakers
+│   │   ├── guardian.py          # Risk guardian (drawdown, stop-loss, position scaling, recovery mode)
+│   │   ├── signals.py           # Market signal analysis
+│   │   └── manager.py           # Legacy risk manager
 │   └── execution/
-│       ├── prices.py         # Price feeds (Jupiter, DeFiLlama)
-│       ├── orca.py           # Orca Whirlpool execution
-│       └── jupiter.py        # Jupiter swaps + JLP
-├── frontend/                 # React dashboard
-│   ├── src/
-│   │   ├── App.tsx
-│   │   └── components/
-├── state/                    # Runtime state (gitignored)
-│   ├── portfolio.json
-│   ├── history.json
-│   └── events.json
-└── docs/
-    ├── ARCHITECTURE.md       # This file
-    ├── IRIS_OPERATIONS.md    # Iris management guide
-    └── API.md                # REST API reference
+│       ├── prices.py            # Price feeds (Jupiter, DeFiLlama, Drift funding rates)
+│       ├── orca.py              # Orca Whirlpool execution (paper + live)
+│       └── jupiter.py           # Jupiter swaps + JLP execution (paper + live)
+├── frontend/                    # React + TypeScript + Tailwind dashboard
+│   └── src/
+│       ├── App.tsx
+│       └── components/
+│           ├── PortfolioSummary.tsx   # Value, P&L, DPY/MPY/APY projections
+│           ├── StrategyCard.tsx       # Per-strategy status + toggle
+│           ├── ControlPanel.tsx       # Leverage slider, exit controls, cost estimates
+│           ├── PerformanceChart.tsx   # Recharts line chart
+│           ├── RiskPanel.tsx          # Risk level, drawdown, concentration
+│           ├── MarketPanel.tsx        # SOL price, volatility, pool APYs
+│           └── EventLog.tsx           # Event timeline
+├── state/                       # Runtime state (gitignored)
+├── docs/                        # Documentation
+└── requirements.txt
 ```
 
-## Strategy Details
+## Active Strategies
 
-### 1. Tight Range LP (35% allocation)
-- Opens concentrated liquidity on Orca SOL-USDC with +/-2.5% range
-- 5x more capital efficient than standard +/-10% range
-- Auto-rebalances when price exits range (close, re-center, reopen)
-- Expected: 150-200% APY when actively managed
+### Leveraged LP (80% allocation) -- Primary
+- 3x leveraged concentrated LP on Orca SOL-USDC
+- Dynamic range: +/-2% in calm, +/-12% in volatile
+- Compounds fees every time they exceed 0.2% of equity
+- Auto-deleverages (3x -> 1.5x) in high-volatility environments
+- Preemptive rebalancing via momentum detection
 
-### 2. Jupiter Perps LP (25% allocation)
-- Deposits into Jupiter's perpetual exchange as the counterparty
-- Earns from trader fees + trader losses (house edge)
-- Simpler than LP -- just deposit and earn
-- Expected: 40-100% APY, varies with trading activity
+### Volatile Pairs (20% allocation)
+- High-APY pools (SOL-FARTCOIN 172%, etc)
+- +/-3% range, exits at 3% IL
+- Diversification from SOL-USDC concentration
 
-### 3. Fee Compounder (0% direct allocation)
-- Meta-strategy: collects fees from all other strategies
-- Reinvests into existing positions every 4 hours
-- Turns 65% APY into 90%+ effective APY through compounding
-- No capital of its own
+### Dormant Strategies (activate automatically)
+- **Adaptive Range**: Activates during high volatility + recovery mode
+- **Funding Arb**: Activates when Drift perp funding rate exceeds 15% APY
 
-### 4. Multi-Pool (25% allocation)
-- Spreads capital across top 3-5 pools by risk-adjusted APY
-- Wider +/-5% ranges (less rebalancing)
-- DeFiLlama data drives pool selection
-- Rebalances allocation when APY drifts >10%
+## Intelligence Layer
 
-### 5. Volatile Pairs (15% allocation)
-- Targets pools with APY > 100% and TVL > $500k
-- Tighter risk management (exit at 3% IL)
-- Higher reward compensates for higher risk
-- Expected: 200-400% APY on winners
+### Guardian (risk/guardian.py)
+- **DrawdownTracker**: Peak equity tracking, recovery mode at 8% drawdown (caps leverage to 1.5x)
+- **PositionScaler**: Warmup ramp (20% -> 100% over 6h), scales down in drawdown/vol
+- **StopLoss**: Per-position (12%), trailing (15% from peak), daily (8% loss halts all)
+
+### AI Orchestrator (intelligence.py)
+- **RebalanceIntelligence**: Detects momentum approaching range boundary, triggers preemptive rebalance before exit. Checks if rebalance cost is recoverable within 4 hours.
+- **StrategySelector**: Scores strategies by historical performance in similar market conditions. Learns which strategies work when.
+- **Decision Engine**: Combines guardian assessment + rebalance signals + strategy scoring into actions: close risky positions, preemptive rebalances, activate dormant strategies, cap leverage.
 
 ## Control Flow
 
 ```
 Orchestrator Loop (every 30s):
-  1. Update prices (every 10s)
-  2. Update all strategy positions (IL, fees, range status)
-  3. Check risk (every 15s)
-     - Market signals (trend, volatility, volume)
-     - Drawdown check
-     - Circuit breaker check
-     - Concentration check
-  4. Evaluate strategies (rebalance? open? close?)
-  5. Execute pending actions
-  6. Compound fees (every 4h)
-  7. Save snapshot (every 60s)
+  1. Update SOL price (every 10s via Jupiter)
+  2. Update pool APYs + funding rates (every 5min via DeFiLlama + Drift)
+  3. Update all strategy positions (IL, fees, range status)
+  4. Intelligence cycle (every 15s):
+     a. Guardian: drawdown check, stop-loss check, position scaling
+     b. AI: preemptive rebalance check, dormant strategy activation
+     c. Execute risk actions (close, deleverage, activate)
+  5. Strategy evaluation (rebalance? compound? resize?)
+  6. Execute pending actions
+  7. Record performance for AI learning
+  8. Save snapshot (every 60s)
 ```
 
 ## Risk Controls
 
 | Control | Threshold | Action |
 |---------|-----------|--------|
-| Max Drawdown | 10% | Scale down all strategies |
-| Circuit Breaker | 5% loss in 1 hour | Emergency exit all positions |
-| SOL Crash | -15% in 24h | Pause volatile strategies |
-| Concentration | >50% in one strategy | Rebalance allocation |
-| Volatility | Extreme | Widen ranges, reduce size |
-
-## Modes
-
-- **paper**: All strategies simulate using real market data. No transactions sent.
-- **live**: Real on-chain execution via Orca + Jupiter + Jito.
-
-Always paper trade first. Switch to live only after validation.
+| Position stop-loss | 12% loss | Close position |
+| Trailing stop | 15% from peak | Close position |
+| Daily stop | 8% daily loss | Halt all trading |
+| Circuit breaker | 5% hourly loss | Emergency exit all |
+| Drawdown recovery | 8% drawdown | Cap leverage to 1.5x |
+| Volatility scaling | Vol > 4% | Reduce leverage to 1.5x |
+| Warmup scaling | First 6 hours | Gradual ramp 20% -> 100% |
 
 ## Data Sources
 
@@ -116,12 +118,12 @@ Always paper trade first. Switch to live only after validation.
 |------|--------|-----------|
 | SOL Price | Jupiter Quote API | Every 10s |
 | Pool APYs | DeFiLlama Yields API | Every 5min |
+| Funding Rates | Drift Protocol API | Every 5min |
 | Pool State | Solana RPC (self-hosted) | On-demand |
-| JLP Price | Jupiter Price API | Every 10s |
 
 ## Deployment
 
 - **Server**: systemd service on Azure VM (4.154.209.244)
-- **Frontend**: nginx serving built React app, proxying /api to uvicorn
+- **Frontend**: nginx serving built React app, proxying /api to uvicorn on port 8090
 - **State**: JSON files in state/ directory
 - **Logs**: journalctl for systemd service logs

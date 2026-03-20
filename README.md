@@ -1,41 +1,58 @@
 # Alpha Engine
 
-Automated DeFi yield engine on Solana. Runs 5 coordinated strategies targeting 10-25% monthly returns.
+Automated leveraged LP yield engine on Solana. 3x leveraged concentrated liquidity with dynamic range sizing, aggressive compounding, and AI-driven risk management.
+
+Backtested: **$1,000 -> $29,036 in 11 months** (340-day backtest, SOL -32.4%, zero losing months).
+
+## How It Works
+
+1. Opens concentrated LP positions on Orca SOL-USDC
+2. Borrows USDC to lever up 3x (net of 12% APY borrow cost)
+3. Dynamically tightens range in calm markets (+/-2%) for max fee capture
+4. Widens range in volatile markets (+/-12%) to avoid rebalance bleed
+5. Compounds fees back into position every few hours
+6. AI orchestrator manages preemptive rebalancing, drawdown protection, and strategy activation
 
 ## Strategies
 
-| # | Strategy | Mechanism | Target APY |
-|---|----------|-----------|------------|
-| 1 | Tight Range LP | Concentrated LP on Orca, +/-2.5% range, auto-rebalance | 150-200% |
-| 2 | Jupiter Perps LP | Counterparty to perp traders on Jupiter | 40-100% |
-| 3 | Fee Compounder | Auto-compound fees from all strategies | +20% boost |
-| 4 | Multi-Pool | Diversified LP across top pools by APY | 60-120% |
-| 5 | Volatile Pairs | High-APY pools with tight risk management | 200-400% |
+| Strategy | Allocation | Role | Status |
+|----------|-----------|------|--------|
+| Leveraged LP | 80% | 3x leveraged concentrated LP, dynamic range, compounding | Active |
+| Volatile Pairs | 20% | High-APY pools (100%+ APY) | Active |
+| Adaptive Range | 0% | Volatility-adaptive range management | Dormant (activates in high vol + recovery) |
+| Funding Arb | 0% | Perp funding rate capture | Dormant (activates when funding positive) |
 
 ## Quick Start
 
 ```bash
 cd alpha_engine
-
-# Install backend deps
 pip install -r requirements.txt
-
-# Install frontend deps
 cd frontend && npm install && npm run build && cd ..
 
-# Run in paper mode (simulated, no real money)
-python3 -m server --capital 100 --mode paper
+# Paper trade (simulated, real market data)
+python3 -m server --capital 1000 --mode paper
 
 # Dashboard at http://localhost:8090
 ```
 
-## Paper Trading
+## Dashboard
 
-Paper mode uses real market data (real SOL prices, real pool APYs) but simulates all transactions. Validate the system before going live.
+- Portfolio value, P&L, projected DPY/MPY/APY
+- Per-strategy cards with toggle controls
+- Leverage slider (1x-5x)
+- Exit cost estimation
+- Emergency exit (per-strategy or all)
+- Performance chart, risk panel, market data, event log
+- AI reasoning display
+
+## Backtesting
 
 ```bash
-# Paper trade with $1000
-python3 -m server --capital 1000 --mode paper
+# 90-day backtest comparing leverage levels
+python3 -m server.backtest --days 90 --capital 1000 --compare
+
+# 365-day extended backtest
+python3 -m server.backtest_extended --days 365 --capital 1000 --compare
 ```
 
 ## Live Trading
@@ -45,16 +62,11 @@ python3 -m server --capital 1000 --mode paper
 python3 -m server --capital 1000 --mode live
 ```
 
-## API
+## Documentation
 
-Dashboard runs at http://localhost:8090
-
-See [docs/API.md](docs/API.md) for full API reference.
-
-## Architecture
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design.
-
-## Iris Management
-
-See [docs/IRIS_OPERATIONS.md](docs/IRIS_OPERATIONS.md) for AI agent operations guide.
+| Doc | Purpose |
+|-----|---------|
+| [STRATEGY.md](docs/STRATEGY.md) | Strategy design, backtest results, risk analysis |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, components, control flow |
+| [IRIS_OPERATIONS.md](docs/IRIS_OPERATIONS.md) | AI agent management guide |
+| [API.md](docs/API.md) | REST API reference |

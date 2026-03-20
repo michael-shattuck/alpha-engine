@@ -2,227 +2,246 @@
 
 ## System Purpose
 
-Alpha Engine is an automated leveraged LP system on Solana. It earns yield by providing concentrated liquidity on Orca Whirlpools with 2.5x leverage, dynamic range sizing, and aggressive fee compounding. Backtested to +47.8%/month average over 340 days.
+Alpha Engine is an automated 3x leveraged LP system on Solana. It earns yield by providing concentrated liquidity on Orca Whirlpools with dynamic range sizing, aggressive fee compounding, and AI-driven risk management.
+
+Backtested: $1,000 -> $29,036 in 11 months (340 days, SOL -32.4%). Zero losing months. 3.4% max drawdown.
 
 ## Quick Status
 
 ```bash
-curl -s http://localhost:8090/api/status | python3 -m json.tool
+curl -s http://localhost:8090/api/status | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f'Alpha Engine [{d[\"mode\"]}]:')
+print(f'  Capital: \${d[\"capital\"]:,.0f} | Value: \${d[\"total_value\"]:,.2f} | P&L: \${d[\"total_pnl\"]:+,.2f} ({d[\"total_pnl_percent\"]:+.2f}%)')
+print(f'  Projected: {d[\"projected_dpy\"]:+.2f}%/day | {d[\"projected_mpy\"]:+.1f}%/month | {d[\"projected_apy\"]:+.0f}%/year')
+print(f'  Fees: \${d[\"total_fees\"]:,.2f} | Risk: {d[\"risk_level\"]} | CB: {d[\"circuit_breaker_active\"]} | SOL: \${d[\"sol_price\"]:.2f}')
+for sid, s in d['strategies'].items():
+    m = s.get('metrics', {})
+    e = 'ON' if s['enabled'] else 'DORMANT'
+    print(f'  {s[\"name\"]} [{e}]: lev={m.get(\"leverage\",\"-\")} range={m.get(\"range_pct\",\"-\")} health={m.get(\"health_factor\",\"-\")} vol={m.get(\"volatility\",\"-\")}')
+g = d.get('guardian', {})
+if g:
+    print(f'  Guardian: dd={g.get(\"drawdown_pct\",0):.1f}% recovery={g.get(\"recovery_mode\",False)} scale={g.get(\"position_scale\",0):.0%}')
+for r in d.get('ai_reasoning', [])[-3:]:
+    print(f'  AI: {r}')
+"
 ```
-
-Key fields:
-- `total_pnl_percent`: Current P&L. Should be positive and growing.
-- `projected_mpy`: Projected monthly return based on current rate.
-- `projected_apy`: Projected annual return.
-- `risk_level`: "low"/"medium" is healthy. "high"/"critical" needs action.
-- `circuit_breaker_active`: If true, everything is stopped.
-- `total_fees`: Cumulative fees earned.
 
 ## Service Management
 
 ```bash
 sudo systemctl status alpha-engine
 sudo systemctl restart alpha-engine
+sudo systemctl stop alpha-engine
 sudo journalctl -u alpha-engine -f
+sudo journalctl -u alpha-engine --since '1 hour ago' -p err
 ```
 
 ## Architecture
 
-Two active strategies:
-1. **Leveraged LP** (80% allocation): 2.5x leveraged concentrated LP on Orca SOL-USDC with dynamic range sizing and compounding. This is the primary alpha generator.
-2. **Volatile Pairs** (20% allocation): High-APY pools (100%+ APY). Diversification and upside capture.
+### Active Strategies
+| Strategy | Allocation | Mechanism |
+|----------|-----------|-----------|
+| Leveraged LP | 80% | 3x leveraged concentrated LP on Orca SOL-USDC, dynamic range, compounding |
+| Volatile Pairs | 20% | High-APY pools (100%+ APY), +/-3% range |
 
-## How the Leveraged LP Works
+### Dormant Strategies (auto-activate)
+| Strategy | Trigger | Mechanism |
+|----------|---------|-----------|
+| Adaptive Range | High vol + recovery mode | Volatility-adaptive range management |
+| Funding Arb | Drift funding > 15% APY | Short perps when shorts earn funding |
 
-1. Deposits equity into Orca SOL-USDC concentrated LP position
-2. Borrows additional USDC at ~12% APY to lever up 2.5x
-3. Earns LP fees at concentrated rate (2-8x base APY depending on range width)
-4. Automatically adjusts range width based on volatility:
-   - Vol < 0.5%: +/-2% range (tight, max fees)
-   - Vol 0.5-1.5%: +/-3%
-   - Vol 1.5-3%: +/-5%
-   - Vol 3-6%: +/-8%
-   - Vol > 6%: +/-12% (wide, protect capital)
-5. Auto-deleverages (reduces to 1.5x) in high-volatility environments
-6. Compounds fees back into position every time fees exceed 0.2% of equity
-7. Auto-rebalances when price exits range
+### Intelligence Layer
+- **Guardian**: Drawdown tracking, stop-losses, recovery mode, warmup scaling
+- **AI Orchestrator**: Preemptive rebalancing, strategy scoring, dormant activation
 
-## Key Metrics to Monitor
+## Key Metrics
 
-### Strategy Metrics (via /api/strategies/leveraged_lp)
+### Health Indicators
 
 | Metric | Healthy | Warning | Critical |
 |--------|---------|---------|----------|
-| health_factor | > 2.0 | 1.2 - 2.0 | < 1.2 |
-| leverage | 1.5 - 2.5 | 2.5 - 3.0 | > 3.0 |
-| volatility | < 0.03 | 0.03 - 0.06 | > 0.06 |
-| range_pct | 0.02 - 0.08 | 0.08 - 0.12 | stuck at 0.12 |
-| net_value | > equity | declining | < 80% of equity |
+| projected_dpy | > +1% | 0-1% | < 0% |
+| projected_mpy | > +20% | 5-20% | < 5% |
+| risk_level | low | medium/high | critical |
+| health_factor | > 2.0 | 1.2-2.0 | < 1.2 |
+| drawdown_pct | < 3% | 3-8% | > 8% |
+| volatility | < 0.03 | 0.03-0.06 | > 0.06 |
+| position_scale | 100% | 50-99% | < 50% |
+| circuit_breaker | false | - | true |
 
-### Portfolio Metrics (via /api/status)
-
-| Metric | Healthy | Warning | Critical |
-|--------|---------|---------|----------|
-| projected_mpy | > 10% | 5-10% | < 5% or negative |
-| risk_level | low/medium | high | critical |
-| total_pnl_percent | positive | -1% to 0% | < -5% |
+### What the AI Reasoning Tells You
+The `ai_reasoning` field in /api/status shows the AI's latest decision reasoning:
+- "Position scale: X%" -- Guardian is limiting position size (warmup or drawdown)
+- "Leverage capped to X.Xx" -- Recovery mode or high volatility
+- "Preemptive rebalance: approaching_lower" -- AI detected momentum toward range boundary
+- "Activate funding_arb: funding_apy=X%" -- Dormant strategy activating
+- "High rebalance frequency" -- Consider checking if market is too choppy
 
 ## AI Management Playbook
 
 ### Routine Monitoring (every 30 minutes)
 
-```bash
-STATUS=$(curl -s http://localhost:8090/api/status)
-echo $STATUS | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-risk = d['risk_level']
-pnl = d['total_pnl_percent']
-mpy = d['projected_mpy']
-cb = d['circuit_breaker_active']
-print(f'P&L: {pnl:+.2f}% | Projected: {mpy:.1f}%/mo | Risk: {risk} | CB: {cb}')
-for sid, s in d['strategies'].items():
-    m = s.get('metrics', {})
-    print(f'  {s[\"name\"]}: health={m.get(\"health_factor\",0):.1f} lev={m.get(\"leverage\",0):.1f}x vol={m.get(\"volatility\",0):.4f} range={m.get(\"range_pct\",0):.1%}')
-"
-```
+Check status. If all green, do nothing. System is self-managing.
 
 ### Decision Matrix
 
-| Condition | Action |
-|-----------|--------|
-| health_factor < 1.5 | Reduce leverage: disable leveraged_lp, wait for volatility to drop |
-| volatility > 0.06 for > 2 hours | System auto-widens range. Verify it happened. |
-| total_pnl_percent < -5% | Check if circuit breaker should trigger. Consider manual pause. |
-| projected_mpy < 5% for > 24h | Check pool APY -- may be low-volume period. Normal during weekends. |
-| projected_mpy > 50% | Verify accuracy. Could be calculation artifact from short uptime. |
-| circuit_breaker triggered | All positions closed. Investigate cause. Don't restart immediately. |
-| Leveraged LP status = "error" | Check error field. Usually RPC or API transient failure. Restart. |
-| Leveraged LP status = "idle" | Means it deleveraged. Check health_factor history. May need manual re-enable. |
-| SOL drops > 10% in 24h | System auto-deleverages and widens range. Verify. Consider pausing volatile_pairs. |
-| SOL pumps > 10% in 24h | Positions may exit range upward. System auto-rebalances. Verify. |
+| Condition | Action | Urgency |
+|-----------|--------|---------|
+| Everything green, projected_mpy > 20% | None. System working. | Low |
+| projected_mpy 5-20% | Normal during weekends/low vol. Monitor. | Low |
+| projected_mpy < 5% for > 24h | Check pool APY at DeFiLlama. May need wider market. | Medium |
+| risk_level = high | Guardian auto-adjusts. Verify leverage reduced. | Medium |
+| risk_level = critical | Check if circuit breaker should trigger. | High |
+| drawdown > 5% | Guardian scales down. Verify in logs. | Medium |
+| drawdown > 8% | Recovery mode active. Leverage capped at 1.5x. Monitor. | High |
+| circuit_breaker = true | ALL positions closed. Investigate cause before restarting. | Critical |
+| health_factor < 1.5 | Auto-deleverage imminent. Verify. | High |
+| Strategy status = error | Check error field. Usually transient. Restart service. | Medium |
+| Strategy status = idle | Deleveraged or stopped. Check if manual re-enable needed. | Medium |
+| SOL drops > 10% in 24h | System auto-widens range + deleverages. Verify. | High |
+| SOL pumps > 10% in 24h | Positions exit range upward. Auto-rebalances. Verify. | Medium |
 
 ### Adjusting Leverage
 
-When market conditions change, Iris can adjust the base leverage:
-
 ```bash
-# Check current leverage
-curl -s http://localhost:8090/api/strategies/leveraged_lp | python3 -c "import sys,json; m=json.load(sys.stdin)['metrics']; print(f'Current: {m[\"leverage\"]:.1f}x, Target: {m[\"target_leverage\"]:.1f}x, Health: {m[\"health_factor\"]:.1f}')"
-```
+# Set leverage (1.0 - 5.0)
+curl -X POST http://localhost:8090/api/config/leverage \
+  -H 'Content-Type: application/json' -d '{"leverage": 3.0}'
 
-The system auto-adjusts leverage based on volatility (2.5x -> 2.0x -> 1.5x). Iris should not override this unless there's a specific reason (e.g., known upcoming event like a rate decision).
+# Check current
+curl -s http://localhost:8090/api/strategies/leveraged_lp | python3 -c "
+import sys,json; m=json.load(sys.stdin)['metrics']
+print(f'Leverage: {m[\"leverage\"]:.1f}x | Target: {m[\"target_leverage\"]:.1f}x | Health: {m[\"health_factor\"]:.1f}')
+"
+```
 
 ### Adjusting Allocation
 
 ```bash
-# Shift more to leveraged LP (aggressive)
+# Aggressive (more leverage)
 curl -X POST http://localhost:8090/api/config/allocation \
-  -H 'Content-Type: application/json' -d '{
-    "allocations": {"leveraged_lp": 0.90, "volatile_pairs": 0.10}
-  }'
+  -H 'Content-Type: application/json' -d '{"allocations": {"leveraged_lp": 0.90, "volatile_pairs": 0.10}}'
 
-# Shift to conservative (reduce leverage exposure)
+# Conservative (less leverage exposure)
 curl -X POST http://localhost:8090/api/config/allocation \
-  -H 'Content-Type: application/json' -d '{
-    "allocations": {"leveraged_lp": 0.60, "volatile_pairs": 0.40}
-  }'
+  -H 'Content-Type: application/json' -d '{"allocations": {"leveraged_lp": 0.60, "volatile_pairs": 0.40}}'
 ```
 
-### Emergency Procedures
+### Emergency Exit
 
-#### SOL Flash Crash (> 15% in 1 hour)
-1. System should auto-trigger circuit breaker at 5% hourly loss
-2. If it didn't, manually pause:
 ```bash
+# Exit ALL positions
+curl -X POST http://localhost:8090/api/emergency-exit
+
+# Exit single strategy
+curl -X POST http://localhost:8090/api/emergency-exit/leveraged_lp
+
+# Disable a strategy (keeps positions but stops new ones)
 curl -X POST http://localhost:8090/api/strategies/leveraged_lp/toggle \
   -H 'Content-Type: application/json' -d '{"enabled": false}'
 ```
-3. Wait for stability (at least 2 hours of < 2% hourly movement)
+
+### Checking Exit Cost
+
+```bash
+curl -s http://localhost:8090/api/exit-cost | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f'Deployed: \${d[\"total_deployed\"]:,.2f} | Borrowed: \${d[\"total_borrowed\"]:,.2f}')
+print(f'Exit cost: \${d[\"estimated_total_cost\"]:.2f} ({d[\"cost_percent\"]:.3f}%)')
+"
+```
+
+### Checking AI Intelligence
+
+```bash
+curl -s http://localhost:8090/api/intelligence | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f'Rebalances (24h): {d[\"rebalance_frequency_24h\"]:.1f}/day')
+print(f'Rebalance cost (24h): \${d[\"rebalance_cost_24h\"]:.2f}')
+g = d.get('guardian', {})
+print(f'Guardian: dd={g.get(\"drawdown_pct\",0):.1f}% recovery={g.get(\"recovery_mode\")} scale={g.get(\"position_scale\",0):.0%}')
+for r in d.get('reasoning', []):
+    print(f'  {r}')
+"
+```
+
+## Emergency Procedures
+
+### SOL Flash Crash (> 15% in 1 hour)
+1. System should auto-trigger circuit breaker at 5% hourly loss
+2. If it didn't: `curl -X POST http://localhost:8090/api/emergency-exit`
+3. Wait at least 2 hours of < 2% hourly movement
 4. Restart: `sudo systemctl restart alpha-engine`
 
-#### System Not Responding
+### System Not Responding
 ```bash
-# Check if process is alive
 sudo systemctl status alpha-engine
-
-# Check recent logs for errors
-sudo journalctl -u alpha-engine --since "30 min ago" -p err
-
-# Force restart
+sudo journalctl -u alpha-engine --since '30 min ago' -p err
 sudo systemctl restart alpha-engine
 ```
 
-#### Negative P&L for > 48 Hours
-1. Check SOL price trend -- sustained decline means IL is accumulating
-2. Check if auto-deleverage happened (leverage should be 1.5x in high vol)
-3. If P&L is < -10%, consider pausing until market stabilizes:
-```bash
-curl -X POST http://localhost:8090/api/strategies/leveraged_lp/toggle \
-  -H 'Content-Type: application/json' -d '{"enabled": false}'
-```
-4. Do NOT restart immediately after pausing. Wait at least 4 hours.
+### Negative P&L for > 48 Hours
+1. Check SOL trend -- sustained decline means IL accumulating
+2. Check if auto-deleverage happened (leverage should be 1.5x)
+3. If P&L < -10%: `curl -X POST http://localhost:8090/api/emergency-exit`
+4. Wait at least 4 hours before restarting
+
+### After Circuit Breaker Triggers
+1. Check what caused it: `curl -s http://localhost:8090/api/events?limit=20`
+2. Check SOL price stability
+3. Do NOT immediately restart. Wait at least 1 hour.
+4. When stable: `sudo systemctl restart alpha-engine`
+5. Guardian warmup will ramp position from 20% to 100% over 6 hours
 
 ## Performance Expectations
 
-### Monthly Returns (from 340-day backtest)
+| Market Condition | Expected Monthly | Expected Daily |
+|-----------------|-----------------|----------------|
+| Flat / low vol | +25-40% | +0.8-1.3% |
+| Bull (SOL +10%) | +30-50% | +1.0-1.7% |
+| Mild bear (SOL -5%) | +15-25% | +0.5-0.8% |
+| Crash (SOL -15%+) | +5-15% | +0.2-0.5% |
+| High vol choppy | +10-20% | +0.3-0.7% |
 
-| Market Condition | Expected Monthly Return |
-|-----------------|------------------------|
-| Flat / low vol | +15-30% |
-| Bull (SOL +10%) | +20-40% |
-| Mild bear (SOL -5%) | +5-15% |
-| Crash (SOL -15%+) | -5% to -15% (auto-deleverage limits loss) |
-| Recovery after crash | +25-50% (compounding on rebuilt equity) |
-
-### Red Flags
-- Monthly return < 0% for 2+ consecutive months: strategy may need parameter tuning
-- Health factor consistently < 1.5: borrow rate may have increased, check Kamino/MarginFi
-- Rebalance frequency > 10/day: volatility too high for current range settings
+Worst month in 340-day backtest: +16.5% (during warmup).
 
 ## Reporting Format
 
-When reporting on Alpha Engine:
 ```
 Alpha Engine [paper/live]:
-  Capital: $X | Value: $Y | P&L: $Z (+X.X%)
-  Projected: +XX.X%/month | +XXX%/year
-  Risk: low | Health: X.X | Leverage: X.Xx
-  SOL: $XX.XX | Volatility: X.XX% | Range: +/-X.X%
-  Strategies: leveraged_lp (active), volatile_pairs (active)
-  Uptime: XXh | Last event: [type] [time ago]
-  Recent: [last 3 events from /api/events]
+  Capital: $X | Value: $Y | P&L: +$Z (+X.X%)
+  Projected: +X.XX%/day | +XX.X%/month | +XXX%/year
+  Fees: $X.XX | Risk: low | SOL: $XX.XX
+  Leveraged LP [ON]: 3.0x lev | +/-X.X% range | health=X.X | vol=X.XXXX
+  Volatile Pairs [ON]: X positions | $X.XX fees
+  Guardian: dd=X.X% | recovery=false | scale=100%
+  AI: [latest reasoning]
+  Uptime: XXh | Events: [last 3]
 ```
 
-## Configuration Reference
+## Configuration
 
-| Parameter | Default | Location | Effect |
-|-----------|---------|----------|--------|
-| base_leverage | 2.5 | LeveragedLPStrategy init | Max leverage in calm markets |
-| base_range | 0.05 | LeveragedLPStrategy init | Default range width |
-| BORROW_RATE_APY | 12.0 | leveraged_lp.py | Assumed borrow cost |
-| COMPOUND_THRESHOLD | 0.002 | leveraged_lp.py | Compound when fees > 0.2% of equity |
-| REBALANCE_COST | 0.0008 | leveraged_lp.py | Slippage cost per rebalance |
-| ORCHESTRATOR_INTERVAL | 30 | config.py | Main loop frequency (seconds) |
-| PRICE_UPDATE_INTERVAL | 10 | config.py | Price fetch frequency (seconds) |
-| RISK_CHECK_INTERVAL | 15 | config.py | Risk assessment frequency (seconds) |
+| Parameter | Default | API Endpoint | Effect |
+|-----------|---------|-------------|--------|
+| leverage | 3.0 | POST /api/config/leverage | Max leverage in calm markets |
+| allocation | 80/20 | POST /api/config/allocation | Capital split between strategies |
+| BORROW_RATE_APY | 12.0 | server code | Assumed borrow cost |
+| COMPOUND_THRESHOLD | 0.002 | server code | Compound when fees > 0.2% of equity |
+| REBALANCE_COST | 0.0008 | server code | Slippage per rebalance |
+| ORCHESTRATOR_INTERVAL | 30s | config.py | Main loop frequency |
+| PRICE_UPDATE_INTERVAL | 10s | config.py | Price fetch frequency |
+| RISK_CHECK_INTERVAL | 15s | config.py | Intelligence cycle frequency |
 
 ## Ports
 
 | Port | Service |
 |------|---------|
 | 8090 | Alpha Engine API + Dashboard |
-| 8080 | Smart Money Dashboard (separate) |
-| 8081 | Smart Money API (separate) |
-| 8440 | Liquidation Bot Dashboard (separate) |
-
-## Logs
-
-```bash
-sudo journalctl -u alpha-engine --since "1 hour ago"
-sudo journalctl -u alpha-engine -p err --since "1 hour ago"
-sudo journalctl -u alpha-engine -f
-```
+| 8080 | Smart Money Dashboard |
+| 8081 | Smart Money API |
+| 8440 | Liquidation Bot Dashboard |
 
 ## State Files
 
