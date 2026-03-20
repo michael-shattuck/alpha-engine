@@ -79,7 +79,7 @@ def _align_tick(tick: int, spacing: int) -> int:
 
 def _tick_array_start(tick: int, spacing: int) -> int:
     ticks_per_array = spacing * 88
-    return _align_tick(tick, ticks_per_array)
+    return (tick // ticks_per_array) * ticks_per_array
 
 
 class OrcaExecutor:
