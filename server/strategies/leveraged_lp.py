@@ -29,6 +29,7 @@ class LeveragedLPStrategy(BaseStrategy):
         self.base_range = base_range
         self._price_buffer: list[float] = []
         self.orca: OrcaExecutor | None = None
+        self._force_range: float | None = None
         self._action_timestamps: list[float] = []
         self._last_close_time: float = 0
         self._last_error_time: float = 0
