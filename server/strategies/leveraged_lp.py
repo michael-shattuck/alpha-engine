@@ -220,7 +220,7 @@ class LeveragedLPStrategy(BaseStrategy):
             eq = pos.metadata.get("equity", 0)
             net = pos.current_value_usd + pos.fees_earned_usd - pos.metadata.get("borrowed_usd", 0)
             if eq > 0 and pos.age_hours > 0.1:
-                hourly_return = (net - eq) / eq / pos.age_hours
+                hourly_return = (net - eq) / eq / pos.age_hours if pos.age_hours > 0.01 else 0
                 projected_apy = hourly_return * 8760 * 100
 
         self.last_update = now
