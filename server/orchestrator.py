@@ -151,22 +151,14 @@ class Orchestrator:
             action_type = action.get("type", "")
 
             if action_type == "emergency_halt":
-                log.warning(f"EMERGENCY HALT: {action.get('reason')}")
+                log.warning(f"EMERGENCY HALT FLAGGED (not auto-executing in live): {action.get('reason')}")
                 self.state.portfolio.circuit_breaker_active = True
-                await self._emergency_exit(market_data)
-                self.state.add_event("emergency_halt", "ai", action)
+                self.state.add_event("emergency_halt_flagged", "ai", action)
                 return
 
             elif action_type == "close_position":
-                sid = action.get("strategy")
-                strategy = self.strategies.get(sid)
-                if strategy:
-                    await strategy.execute(
-                        {"action": "close", "position_id": action["position_id"]},
-                        market_data,
-                    )
-                    self.state.add_event("risk_close", sid, action)
-                    log.info(f"Risk close: {sid}/{action['position_id']}: {action.get('reason')}")
+                log.warning(f"RISK CLOSE FLAGGED (not auto-executing in live): {action}")
+                self.state.add_event("risk_close_flagged", "ai", action)
 
             elif action_type == "preemptive_rebalance":
                 sid = action.get("strategy")

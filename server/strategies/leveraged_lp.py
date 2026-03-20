@@ -19,17 +19,41 @@ class LeveragedLPStrategy(BaseStrategy):
     TX_COST_USD = 0.15
     MIN_COMPOUND_USD = 0.50
 
+    MAX_ACTIONS_PER_HOUR = 3
+    COOLDOWN_AFTER_CLOSE_SEC = 300
+    COOLDOWN_AFTER_ERROR_SEC = 600
+
     def __init__(self, mode: str = "paper", base_leverage: float = 3.0, base_range: float = 0.05):
         super().__init__(mode=mode)
         self.base_leverage = base_leverage
         self.base_range = base_range
         self._price_buffer: list[float] = []
         self.orca: OrcaExecutor | None = None
+        self._action_timestamps: list[float] = []
+        self._last_close_time: float = 0
+        self._last_error_time: float = 0
+        self._has_opened_live: bool = False
 
     async def init_executors(self):
         if self.mode == "live" and not self.orca:
             self.orca = OrcaExecutor(paper_mode=False)
             await self.orca.start()
+
+    def _actions_this_hour(self) -> int:
+        cutoff = time.time() - 3600
+        self._action_timestamps = [t for t in self._action_timestamps if t > cutoff]
+        return len(self._action_timestamps)
+
+    def _record_action(self):
+        self._action_timestamps.append(time.time())
+
+    def _in_cooldown(self) -> bool:
+        now = time.time()
+        if now - self._last_close_time < self.COOLDOWN_AFTER_CLOSE_SEC:
+            return True
+        if now - self._last_error_time < self.COOLDOWN_AFTER_ERROR_SEC:
+            return True
+        return False
 
     def _volatility(self) -> float:
         if len(self._price_buffer) < 3:
@@ -69,6 +93,13 @@ class LeveragedLPStrategy(BaseStrategy):
         if len(self._price_buffer) > 24:
             self._price_buffer = self._price_buffer[-24:]
 
+        if self.mode == "live":
+            if self._in_cooldown():
+                return {"action": "wait", "reason": "cooldown_active"}
+            if self._actions_this_hour() >= self.MAX_ACTIONS_PER_HOUR:
+                log.warning(f"Max actions/hour ({self.MAX_ACTIONS_PER_HOUR}) reached. Halting.")
+                return {"action": "wait", "reason": "max_actions_reached"}
+
         for position in self.active_positions:
             if sol_price < position.lower_price or sol_price > position.upper_price:
                 return {
@@ -96,7 +127,7 @@ class LeveragedLPStrategy(BaseStrategy):
 
             current_range = position.metadata.get("range_pct", self.base_range)
             optimal = self._optimal_range()
-            if abs(optimal - current_range) / current_range > 0.5:
+            if current_range > 0 and abs(optimal - current_range) / current_range > 0.5:
                 return {
                     "action": "resize",
                     "position_id": position.id,
@@ -104,6 +135,8 @@ class LeveragedLPStrategy(BaseStrategy):
                 }
 
         if not self.active_positions and self.capital_allocated > 0:
+            if self.mode == "live" and self._has_opened_live and self._in_cooldown():
+                return {"action": "wait", "reason": "cooldown_after_close"}
             return {"action": "open", "deposit_usd": self.capital_allocated}
 
         return {"action": "hold"}
@@ -176,32 +209,45 @@ class LeveragedLPStrategy(BaseStrategy):
         sol_price = market_data["sol_price"]
         act = action["action"]
 
+        if self._actions_this_hour() >= self.MAX_ACTIONS_PER_HOUR:
+            log.error("SAFETY: Max actions/hour reached. Refusing to execute.")
+            return None
+
         if act == "deleverage":
             pos = next((p for p in self.active_positions if p.id == action["position_id"]), None)
             if pos and pos.metadata.get("position_mint"):
                 try:
                     result = await self.orca.close_position(self.orca.keypair, pos.metadata["position_mint"])
                     log.info(f"Live close: {result.get('signature')}")
+                    self._record_action()
+                    self._last_close_time = time.time()
                 except Exception as e:
                     log.error(f"Live close failed: {e}")
                     self.error = str(e)
+                    self._last_error_time = time.time()
             self.close_position(action["position_id"])
             self.status = "idle"
             return None
 
-        if act in ("open", "rebalance", "compound", "resize"):
-            if act in ("rebalance", "compound", "resize"):
-                old = next((p for p in self.active_positions if p.id == action["position_id"]), None)
-                if old and old.metadata.get("position_mint"):
-                    try:
-                        result = await self.orca.close_position(self.orca.keypair, old.metadata["position_mint"])
-                        log.info(f"Live close for {act}: {result.get('signature')}")
-                    except Exception as e:
-                        log.error(f"Live close for {act} failed: {e}")
-                        self.error = str(e)
-                        return None
-                self.close_position(action["position_id"])
+        if act in ("rebalance", "resize"):
+            old = next((p for p in self.active_positions if p.id == action["position_id"]), None)
+            if old and old.metadata.get("position_mint"):
+                try:
+                    result = await self.orca.close_position(self.orca.keypair, old.metadata["position_mint"])
+                    log.info(f"Live close for {act}: {result.get('signature')}")
+                    self._record_action()
+                    self._last_close_time = time.time()
+                except Exception as e:
+                    log.error(f"Live close for {act} failed: {e}")
+                    self.error = str(e)
+                    self._last_error_time = time.time()
+                    return None
+            self.close_position(action["position_id"])
+            log.info(f"Position closed for {act}. Will reopen after cooldown.")
+            self.status = "idle"
+            return None
 
+        if act == "open":
             rng = self._optimal_range()
             lower_price = sol_price * (1 - rng)
             upper_price = sol_price * (1 + rng)
@@ -214,54 +260,60 @@ class LeveragedLPStrategy(BaseStrategy):
             reserve_sol = 0.1
 
             target_usd = self.capital_allocated
-            target_sol = target_usd / sol_price
+            max_sol = target_usd / sol_price
             available_sol = max(sol_balance - reserve_sol, 0)
-            deposit_sol = min(target_sol, available_sol)
+            deposit_sol = min(max_sol, available_sol)
+            if deposit_sol * sol_price > target_usd * 1.05:
+                deposit_sol = max_sol
 
             if deposit_sol < 0.05:
-                log.error(f"Insufficient SOL: have {sol_balance:.4f}, need {target_sol:.4f} + {reserve_sol} reserve")
+                log.error(f"Insufficient SOL: {sol_balance:.4f} available")
                 self.error = "insufficient_balance"
+                self._last_error_time = time.time()
                 return None
 
             deposit_usd = deposit_sol * sol_price
             sol_for_lp = deposit_sol / 2
             sol_to_swap = deposit_sol / 2
-            log.info(f"Live open: {deposit_sol:.4f} SOL (${deposit_usd:.2f}), swap {sol_to_swap:.4f} SOL to USDC")
+
+            log.info(f"Live open: {deposit_sol:.4f} SOL (${deposit_usd:.2f})")
 
             try:
                 swap_lamports = int(sol_to_swap * 1e9)
                 swap_result = await self.orca.swap(
-                    self.orca.keypair,
-                    ORCA_WHIRLPOOL_SOL_USDC,
-                    swap_lamports,
-                    a_to_b=True,
+                    self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
+                    swap_lamports, a_to_b=True,
                 )
-                log.info(f"Live swap SOL->USDC via Orca: {swap_result.get('signature')}")
+                log.info(f"Live swap: {swap_result.get('signature')}")
                 usdc_amount = sol_to_swap * sol_price
             except Exception as e:
                 log.error(f"Live swap failed: {e}")
                 self.error = str(e)
+                self._last_error_time = time.time()
                 return None
 
             lower_tick = self.orca.price_to_tick(lower_price)
             upper_tick = self.orca.price_to_tick(upper_price)
-            sol_amount, usdc_calc, liquidity = self.orca.calculate_liquidity(
+            _, _, liquidity = self.orca.calculate_liquidity(
                 deposit_usd, current_price, lower_price, upper_price
             )
 
             try:
                 result = await self.orca.open_position(
-                    self.orca.keypair,
-                    ORCA_WHIRLPOOL_SOL_USDC,
-                    lower_tick, upper_tick,
-                    liquidity,
+                    self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
+                    lower_tick, upper_tick, liquidity,
                     sol_for_lp, usdc_amount,
                 )
-                log.info(f"Live open position: {result.get('signature')} mint={result.get('position_mint')}")
+                log.info(f"Live open: {result.get('signature')} mint={result.get('position_mint')}")
             except Exception as e:
-                log.error(f"Live open position failed: {e}")
-                self.error = str(e)
+                log.error(f"Live LP open failed (swap already done): {e}")
+                self.error = f"LP_OPEN_FAILED_AFTER_SWAP: {e}"
+                self._last_error_time = time.time()
+                self._last_close_time = time.time()
                 return None
+
+            self._record_action()
+            self._has_opened_live = True
 
             position = StrategyPosition(
                 id=f"{self.STRATEGY_ID}_{int(time.time())}",
@@ -280,7 +332,6 @@ class LeveragedLPStrategy(BaseStrategy):
                     "range_pct": rng,
                     "position_mint": result.get("position_mint"),
                     "open_signature": result.get("signature"),
-                    "swap_signature": swap_result.get("signature"),
                 },
             )
             self.positions.append(position)
@@ -289,60 +340,6 @@ class LeveragedLPStrategy(BaseStrategy):
             return position
 
         return None
-
-    async def _sync_onchain_position(self, position, sol_price: float):
-        if self.mode != "live" or not self.orca:
-            return
-        mint = position.metadata.get("position_mint")
-        if not mint:
-            return
-        try:
-            from solders.pubkey import Pubkey
-            pos_data = await self.orca._fetch_position_data(Pubkey.from_string(mint))
-            pool_state = await self.orca.fetch_whirlpool_state()
-
-            liquidity = pos_data["liquidity"]
-            tick_lower = pos_data["tick_lower"]
-            tick_upper = pos_data["tick_upper"]
-            fee_owed_a = pos_data.get("fee_owed_a", 0)
-            fee_owed_b = pos_data.get("fee_owed_b", 0)
-            current_tick = pool_state["tick"]
-            sqrt_price = pool_state["sqrt_price"]
-
-            position.lower_price = self.orca.tick_to_price(tick_lower)
-            position.upper_price = self.orca.tick_to_price(tick_upper)
-            position.in_range = tick_lower <= current_tick <= tick_upper
-
-            sqrt_pa = self.orca._tick_to_sqrt_price_x64(tick_lower)
-            sqrt_pb = self.orca._tick_to_sqrt_price_x64(tick_upper)
-            sqrt_pc = sqrt_price
-
-            if current_tick < tick_lower:
-                token_a = liquidity * (sqrt_pb - sqrt_pa) // (sqrt_pa * sqrt_pb // (2**64))
-                token_b = 0
-            elif current_tick >= tick_upper:
-                token_a = 0
-                token_b = liquidity * (sqrt_pb - sqrt_pa) // (2**64)
-            else:
-                token_a = liquidity * (sqrt_pb - sqrt_pc) // (sqrt_pc * sqrt_pb // (2**64))
-                token_b = liquidity * (sqrt_pc - sqrt_pa) // (2**64)
-
-            sol_value = (token_a / 1e9) * sol_price
-            usdc_value = token_b / 1e6
-            position.current_value_usd = sol_value + usdc_value
-            position.sol_amount = token_a / 1e9
-            position.usdc_amount = token_b / 1e6
-
-            fee_sol_usd = (fee_owed_a / 1e9) * sol_price
-            fee_usdc = fee_owed_b / 1e6
-            position.fees_earned_usd = fee_sol_usd + fee_usdc
-
-            position.metadata["onchain_liquidity"] = liquidity
-            position.metadata["onchain_fees_sol"] = fee_owed_a / 1e9
-            position.metadata["onchain_fees_usdc"] = fee_owed_b / 1e6
-            position.metadata["last_onchain_sync"] = time.time()
-        except Exception as e:
-            log.warning(f"On-chain sync failed: {e}")
 
     async def update(self, market_data: dict):
         sol_price = market_data.get("sol_price", 0)
@@ -358,29 +355,28 @@ class LeveragedLPStrategy(BaseStrategy):
             if hours_elapsed <= 0:
                 continue
 
-            if True:
-                rng = position.metadata.get("range_pct", self.base_range)
-                in_range = position.lower_price <= sol_price <= position.upper_price
-                position.in_range = in_range
+            rng = position.metadata.get("range_pct", self.base_range)
+            in_range = position.lower_price <= sol_price <= position.upper_price
+            position.in_range = in_range
 
-                if in_range:
-                    ratio = sol_price / position.entry_price
-                    std_il = 2 * math.sqrt(ratio) / (1 + ratio) - 1
-                    rw = (position.upper_price - position.lower_price) / position.entry_price
-                    cf = min(2.0 / rw, 10.0) if rw > 0 else 1
-                    position.current_value_usd = position.deposit_usd * (1 + std_il * cf)
+            if in_range:
+                ratio = sol_price / position.entry_price if position.entry_price > 0 else 1
+                std_il = 2 * math.sqrt(ratio) / (1 + ratio) - 1
+                rw = (position.upper_price - position.lower_price) / position.entry_price if position.entry_price > 0 else 0.1
+                cf = min(2.0 / rw, 10.0) if rw > 0 else 1
+                position.current_value_usd = position.deposit_usd * (1 + std_il * cf)
 
-                    concentration = min(0.10 / rng, 8.0)
-                    hourly_rate = pool_apy / 100 / 365 / 24 * concentration
-                    position.fees_earned_usd += hourly_rate * hours_elapsed * position.deposit_usd
-                    position.hours_in_range += hours_elapsed
-                elif sol_price < position.lower_price:
-                    sol_at_exit = position.deposit_usd / position.lower_price
-                    position.current_value_usd = sol_at_exit * sol_price
-                    position.hours_out_of_range += hours_elapsed
-                else:
-                    position.current_value_usd = position.deposit_usd
-                    position.hours_out_of_range += hours_elapsed
+                concentration = min(0.10 / rng, 8.0) if rng > 0 else 1
+                hourly_rate = pool_apy / 100 / 365 / 24 * concentration
+                position.fees_earned_usd += hourly_rate * hours_elapsed * position.deposit_usd
+                position.hours_in_range += hours_elapsed
+            elif sol_price < position.lower_price:
+                sol_at_exit = position.deposit_usd / position.lower_price if position.lower_price > 0 else 0
+                position.current_value_usd = sol_at_exit * sol_price
+                position.hours_out_of_range += hours_elapsed
+            else:
+                position.current_value_usd = position.deposit_usd
+                position.hours_out_of_range += hours_elapsed
 
             borrowed = position.metadata.get("borrowed_usd", 0)
             if borrowed > 0:
@@ -425,4 +421,6 @@ class LeveragedLPStrategy(BaseStrategy):
             "borrow_rate_apy": self.BORROW_RATE_APY,
             "pool_apy": pool_apy,
             "projected_apy": projected_apy,
+            "actions_this_hour": self._actions_this_hour(),
+            "in_cooldown": self._in_cooldown(),
         }
