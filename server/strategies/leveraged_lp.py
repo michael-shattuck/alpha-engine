@@ -16,8 +16,9 @@ class LeveragedLPStrategy(BaseStrategy):
     STRATEGY_NAME = "Leveraged LP"
 
     BORROW_RATE_APY = 12.0
-    COMPOUND_THRESHOLD = 0.002
     REBALANCE_COST = 0.0008
+    TX_COST_USD = 0.15
+    MIN_COMPOUND_USD = 0.50
 
     def __init__(self, mode: str = "paper", base_leverage: float = 3.0, base_range: float = 0.05):
         super().__init__(mode=mode)
@@ -90,12 +91,12 @@ class LeveragedLPStrategy(BaseStrategy):
                     "reason": "near_liquidation",
                 }
 
-            if equity > 0 and position.fees_earned_usd > equity * self.COMPOUND_THRESHOLD:
-                if net > equity * 1.001:
-                    return {
-                        "action": "compound",
-                        "position_id": position.id,
-                    }
+            compound_min = max(self.TX_COST_USD * 10, self.MIN_COMPOUND_USD)
+            if position.fees_earned_usd > compound_min and net > equity * 1.001:
+                return {
+                    "action": "compound",
+                    "position_id": position.id,
+                }
 
             current_range = position.metadata.get("range_pct", self.base_range)
             optimal = self._optimal_range()
