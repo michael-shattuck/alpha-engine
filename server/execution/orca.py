@@ -57,7 +57,7 @@ def _derive_position_pda(position_mint: Pubkey) -> tuple[Pubkey, int]:
 
 def _derive_tick_array_pda(whirlpool: Pubkey, start_tick_index: int) -> Pubkey:
     pda, _ = Pubkey.find_program_address(
-        [b"tick_array", bytes(whirlpool), struct.pack("<i", start_tick_index)],
+        [b"tick_array", bytes(whirlpool), str(start_tick_index).encode()],
         WHIRLPOOL_PROGRAM_ID,
     )
     return pda
