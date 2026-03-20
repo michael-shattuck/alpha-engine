@@ -276,21 +276,31 @@ class OrcaExecutor:
 
         token_vault_a = Pubkey.from_string(pool_state["token_vault_a"])
         token_vault_b = Pubkey.from_string(pool_state["token_vault_b"])
-        owner_ata_a = _derive_ata(wallet.pubkey(), Pubkey.from_string(SOL_MINT))
-        owner_ata_b = _derive_ata(wallet.pubkey(), Pubkey.from_string(USDC_MINT))
+        sol_mint = Pubkey.from_string(SOL_MINT)
+        usdc_mint = Pubkey.from_string(USDC_MINT)
+        owner_ata_a = _derive_ata(wallet.pubkey(), sol_mint)
+        owner_ata_b = _derive_ata(wallet.pubkey(), usdc_mint)
 
+        tick_spacing = pool_state["tick_spacing"]
         tick_array_lower = _derive_tick_array_pda(
-            pool_pubkey, _tick_array_start(lower_tick, TICK_SPACING)
+            pool_pubkey, _tick_array_start(lower_tick, tick_spacing)
         )
         tick_array_upper = _derive_tick_array_pda(
-            pool_pubkey, _tick_array_start(upper_tick, TICK_SPACING)
+            pool_pubkey, _tick_array_start(upper_tick, tick_spacing)
         )
 
         sol_lamports = int(sol_amount * 1e9)
         usdc_atoms = int(usdc_amount * 1e6)
-        slippage = 1.02
+        slippage = 1.05
         token_max_a = int(sol_lamports * slippage)
         token_max_b = int(usdc_atoms * slippage)
+
+        pre_ixs = []
+        ata_a_resp = await self.rpc.get_account_info(owner_ata_a)
+        if not ata_a_resp.value:
+            pre_ixs.append(self._create_ata_ix(wallet.pubkey(), wallet.pubkey(), sol_mint))
+        pre_ixs.append(self._transfer_sol_ix(wallet.pubkey(), owner_ata_a, token_max_a))
+        pre_ixs.append(self._sync_native_ix(owner_ata_a))
 
         increase_data = DISCRIMINATORS["increase_liquidity"]
         increase_data += struct.pack("<Q", liquidity)
@@ -322,8 +332,9 @@ class OrcaExecutor:
         msg = MessageV0.try_compile(
             payer=wallet.pubkey(),
             instructions=[
-                set_compute_unit_limit(400_000),
+                set_compute_unit_limit(500_000),
                 set_compute_unit_price(50_000),
+            ] + pre_ixs + [
                 open_ix,
                 increase_ix,
             ],
