@@ -1,9 +1,14 @@
 import math
 import time
+import logging
 from typing import Optional
 
 from server.strategies.base import BaseStrategy, StrategyPosition
-from server.config import ORCA_WHIRLPOOL_SOL_USDC
+from server.config import ORCA_WHIRLPOOL_SOL_USDC, SOL_MINT, USDC_MINT
+from server.execution.orca import OrcaExecutor
+from server.execution.jupiter import JupiterExecutor
+
+log = logging.getLogger("leveraged_lp")
 
 
 class LeveragedLPStrategy(BaseStrategy):
@@ -19,6 +24,15 @@ class LeveragedLPStrategy(BaseStrategy):
         self.base_leverage = base_leverage
         self.base_range = base_range
         self._price_buffer: list[float] = []
+        self.orca: OrcaExecutor | None = None
+        self.jupiter: JupiterExecutor | None = None
+
+    async def init_executors(self):
+        if self.mode == "live" and not self.orca:
+            self.orca = OrcaExecutor(paper_mode=False)
+            self.jupiter = JupiterExecutor(paper_mode=False)
+            await self.orca.start()
+            await self.jupiter.start()
 
     def _volatility(self) -> float:
         if len(self._price_buffer) < 3:
@@ -98,13 +112,16 @@ class LeveragedLPStrategy(BaseStrategy):
         return {"action": "hold"}
 
     async def execute(self, action: dict, market_data: dict) -> Optional[StrategyPosition]:
-        if self.mode != "paper":
-            return None
-
         sol_price = market_data.get("sol_price", 0)
         if sol_price <= 0:
             return None
 
+        if self.mode == "live":
+            return await self._execute_live(action, market_data)
+        return await self._execute_paper(action, market_data)
+
+    async def _execute_paper(self, action: dict, market_data: dict) -> Optional[StrategyPosition]:
+        sol_price = market_data["sol_price"]
         act = action["action"]
 
         if act == "deleverage":
@@ -157,6 +174,120 @@ class LeveragedLPStrategy(BaseStrategy):
 
         return None
 
+    async def _execute_live(self, action: dict, market_data: dict) -> Optional[StrategyPosition]:
+        await self.init_executors()
+        sol_price = market_data["sol_price"]
+        act = action["action"]
+
+        if act == "deleverage":
+            pos = next((p for p in self.active_positions if p.id == action["position_id"]), None)
+            if pos and pos.metadata.get("position_mint"):
+                try:
+                    result = await self.orca.close_position(self.orca.keypair, pos.metadata["position_mint"])
+                    log.info(f"Live close: {result.get('signature')}")
+                except Exception as e:
+                    log.error(f"Live close failed: {e}")
+                    self.error = str(e)
+            self.close_position(action["position_id"])
+            self.status = "idle"
+            return None
+
+        if act in ("open", "rebalance", "compound", "resize"):
+            if act in ("rebalance", "compound", "resize"):
+                old = next((p for p in self.active_positions if p.id == action["position_id"]), None)
+                if old and old.metadata.get("position_mint"):
+                    try:
+                        result = await self.orca.close_position(self.orca.keypair, old.metadata["position_mint"])
+                        log.info(f"Live close for {act}: {result.get('signature')}")
+                    except Exception as e:
+                        log.error(f"Live close for {act} failed: {e}")
+                        self.error = str(e)
+                        return None
+                self.close_position(action["position_id"])
+
+            rng = self._optimal_range()
+            lower_price = sol_price * (1 - rng)
+            upper_price = sol_price * (1 + rng)
+
+            pool_state = await self.orca.fetch_whirlpool_state()
+            current_price = pool_state["current_price"]
+
+            balance_resp = await self.orca.rpc.get_balance(self.orca.keypair.pubkey())
+            sol_balance = balance_resp.value / 1e9
+            reserve_sol = 0.05
+            available_sol = max(sol_balance - reserve_sol, 0)
+
+            if available_sol < 0.01:
+                log.error("Insufficient SOL balance for live execution")
+                self.error = "insufficient_balance"
+                return None
+
+            deposit_sol = available_sol
+            deposit_usd = deposit_sol * sol_price
+            sol_for_lp = deposit_sol / 2
+            sol_to_swap = deposit_sol / 2
+
+            try:
+                swap_lamports = int(sol_to_swap * 1e9)
+                swap_result = await self.jupiter.swap(
+                    self.orca.keypair,
+                    SOL_MINT, USDC_MINT,
+                    swap_lamports, slippage_bps=100
+                )
+                log.info(f"Live swap SOL->USDC: {swap_result.get('signature')}")
+                usdc_amount = int(swap_result.get("out_amount", 0)) / 1e6
+            except Exception as e:
+                log.error(f"Live swap failed: {e}")
+                self.error = str(e)
+                return None
+
+            lower_tick = self.orca.price_to_tick(lower_price)
+            upper_tick = self.orca.price_to_tick(upper_price)
+            sol_amount, usdc_calc, liquidity = self.orca.calculate_liquidity(
+                deposit_usd, current_price, lower_price, upper_price
+            )
+
+            try:
+                result = await self.orca.open_position(
+                    self.orca.keypair,
+                    ORCA_WHIRLPOOL_SOL_USDC,
+                    lower_tick, upper_tick,
+                    liquidity,
+                    sol_for_lp, usdc_amount,
+                )
+                log.info(f"Live open position: {result.get('signature')} mint={result.get('position_mint')}")
+            except Exception as e:
+                log.error(f"Live open position failed: {e}")
+                self.error = str(e)
+                return None
+
+            position = StrategyPosition(
+                id=f"{self.STRATEGY_ID}_{int(time.time())}",
+                pool=ORCA_WHIRLPOOL_SOL_USDC,
+                entry_price=sol_price,
+                lower_price=result.get("lower_price", lower_price),
+                upper_price=result.get("upper_price", upper_price),
+                deposit_usd=deposit_usd,
+                current_value_usd=deposit_usd,
+                sol_amount=sol_for_lp,
+                usdc_amount=usdc_amount,
+                metadata={
+                    "equity": deposit_usd,
+                    "borrowed_usd": 0,
+                    "leverage": 1.0,
+                    "range_pct": rng,
+                    "position_mint": result.get("position_mint"),
+                    "open_signature": result.get("signature"),
+                    "swap_signature": swap_result.get("signature"),
+                },
+            )
+            self.positions.append(position)
+            self.status = "active"
+            self.error = ""
+            return position
+
+        return None
+
     async def update(self, market_data: dict):
         sol_price = market_data.get("sol_price", 0)
         pool_apy = market_data.get("pool_apys", {}).get("orca_sol_usdc", 30.0)
@@ -195,8 +326,9 @@ class LeveragedLPStrategy(BaseStrategy):
                 position.hours_out_of_range += hours_elapsed
 
             borrowed = position.metadata.get("borrowed_usd", 0)
-            borrow_cost = borrowed * (self.BORROW_RATE_APY / 100 / 365 / 24) * hours_elapsed
-            position.fees_earned_usd -= borrow_cost
+            if borrowed > 0:
+                borrow_cost = borrowed * (self.BORROW_RATE_APY / 100 / 365 / 24) * hours_elapsed
+                position.fees_earned_usd -= borrow_cost
 
             equity = position.metadata.get("equity", self.capital_allocated)
             net = position.current_value_usd + position.fees_earned_usd - borrowed
@@ -219,8 +351,8 @@ class LeveragedLPStrategy(BaseStrategy):
             pos = self.active_positions[0]
             eq = pos.metadata.get("equity", 0)
             net = pos.current_value_usd + pos.fees_earned_usd - pos.metadata.get("borrowed_usd", 0)
-            if eq > 0 and pos.age_hours > 0.1:
-                hourly_return = (net - eq) / eq / pos.age_hours if pos.age_hours > 0.01 else 0
+            if eq > 0 and pos.age_hours > 0.01:
+                hourly_return = (net - eq) / eq / pos.age_hours
                 projected_apy = hourly_return * 8760 * 100
 
         self.last_update = now
