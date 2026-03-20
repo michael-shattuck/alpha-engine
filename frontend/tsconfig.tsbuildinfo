@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/components/controlpanel.tsx","./src/components/eventlog.tsx","./src/components/marketpanel.tsx","./src/components/performancechart.tsx","./src/components/portfoliosummary.tsx","./src/components/riskpanel.tsx","./src/components/strategycard.tsx","./src/hooks/usepolling.ts"],"version":"5.7.3"}
