@@ -1,7 +1,12 @@
 import time
+import math
 import asyncio
+import struct
 import httpx
-from server.config import JUPITER_API, JUPITER_PRICE_API, DEFILLAMA_API, SOL_MINT, USDC_MINT
+from server.config import JUPITER_API, JUPITER_PRICE_API, DEFILLAMA_API, SOL_MINT, USDC_MINT, SOLANA_RPC_URL, ORCA_WHIRLPOOL_SOL_USDC
+
+PYTH_HERMES_URL = "http://20.120.229.168:4160"
+PYTH_SOL_USD_FEED = "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d"
 
 
 class PriceService:
@@ -23,30 +28,72 @@ class PriceService:
         if self.http:
             await self.http.aclose()
 
+    async def _price_from_pyth(self) -> float:
+        resp = await self.http.get(
+            f"{PYTH_HERMES_URL}/api/latest_price_feeds",
+            params={"ids[]": PYTH_SOL_USD_FEED}
+        )
+        if resp.status_code == 200:
+            feeds = resp.json()
+            if feeds and len(feeds) > 0:
+                price_data = feeds[0].get("price", {})
+                return int(price_data["price"]) * (10 ** int(price_data["expo"]))
+        return 0
+
+    async def _price_from_orca_rpc(self) -> float:
+        resp = await self.http.post(
+            SOLANA_RPC_URL,
+            json={
+                "jsonrpc": "2.0", "id": 1, "method": "getAccountInfo",
+                "params": [ORCA_WHIRLPOOL_SOL_USDC, {"encoding": "base64"}]
+            }
+        )
+        if resp.status_code == 200:
+            result = resp.json().get("result", {})
+            value = result.get("value")
+            if value:
+                import base64
+                data = base64.b64decode(value["data"][0])
+                if len(data) >= 73:
+                    sqrt_price = int.from_bytes(data[65:73], "little")
+                    price = (sqrt_price / (2**64)) ** 2 * (10 ** (9 - 6))
+                    return price
+        return 0
+
+    async def _price_from_jupiter(self) -> float:
+        resp = await self.http.get(
+            f"{JUPITER_API}/quote",
+            params={
+                "inputMint": SOL_MINT,
+                "outputMint": USDC_MINT,
+                "amount": str(10**9),
+                "slippageBps": 50,
+            }
+        )
+        if resp.status_code == 200:
+            return int(resp.json()["outAmount"]) / 1e6
+        return 0
+
     async def update_sol_price(self) -> float:
-        try:
-            resp = await self.http.get(
-                f"{JUPITER_API}/quote",
-                params={
-                    "inputMint": SOL_MINT,
-                    "outputMint": USDC_MINT,
-                    "amount": str(10**9),
-                    "slippageBps": 50,
-                }
-            )
-            if resp.status_code == 200:
-                price = int(resp.json()["outAmount"]) / 1e6
-                now = time.time()
-                self.sol_price = price
-                self.sol_price_history.append({"t": now, "p": price})
-                self.sol_price_history = [
-                    h for h in self.sol_price_history if now - h["t"] < 86400
-                ]
-                self._compute_volatility()
-                self.last_price_update = now
-                return price
-        except Exception:
-            pass
+        price = 0
+        for source in [self._price_from_pyth, self._price_from_orca_rpc, self._price_from_jupiter]:
+            try:
+                price = await source()
+                if price > 0:
+                    break
+            except Exception:
+                continue
+
+        if price > 0:
+            now = time.time()
+            self.sol_price = price
+            self.sol_price_history.append({"t": now, "p": price})
+            self.sol_price_history = [
+                h for h in self.sol_price_history if now - h["t"] < 86400
+            ]
+            self._compute_volatility()
+            self.last_price_update = now
+
         return self.sol_price
 
     async def get_token_price(self, mint: str) -> float:
