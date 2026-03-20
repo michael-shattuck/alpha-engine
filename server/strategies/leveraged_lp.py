@@ -290,6 +290,60 @@ class LeveragedLPStrategy(BaseStrategy):
 
         return None
 
+    async def _sync_onchain_position(self, position, sol_price: float):
+        if self.mode != "live" or not self.orca:
+            return
+        mint = position.metadata.get("position_mint")
+        if not mint:
+            return
+        try:
+            from solders.pubkey import Pubkey
+            pos_data = await self.orca._fetch_position_data(Pubkey.from_string(mint))
+            pool_state = await self.orca.fetch_whirlpool_state()
+
+            liquidity = pos_data["liquidity"]
+            tick_lower = pos_data["tick_lower"]
+            tick_upper = pos_data["tick_upper"]
+            fee_owed_a = pos_data.get("fee_owed_a", 0)
+            fee_owed_b = pos_data.get("fee_owed_b", 0)
+            current_tick = pool_state["tick"]
+            sqrt_price = pool_state["sqrt_price"]
+
+            position.lower_price = self.orca.tick_to_price(tick_lower)
+            position.upper_price = self.orca.tick_to_price(tick_upper)
+            position.in_range = tick_lower <= current_tick <= tick_upper
+
+            sqrt_pa = self.orca._tick_to_sqrt_price_x64(tick_lower)
+            sqrt_pb = self.orca._tick_to_sqrt_price_x64(tick_upper)
+            sqrt_pc = sqrt_price
+
+            if current_tick < tick_lower:
+                token_a = liquidity * (sqrt_pb - sqrt_pa) // (sqrt_pa * sqrt_pb // (2**64))
+                token_b = 0
+            elif current_tick >= tick_upper:
+                token_a = 0
+                token_b = liquidity * (sqrt_pb - sqrt_pa) // (2**64)
+            else:
+                token_a = liquidity * (sqrt_pb - sqrt_pc) // (sqrt_pc * sqrt_pb // (2**64))
+                token_b = liquidity * (sqrt_pc - sqrt_pa) // (2**64)
+
+            sol_value = (token_a / 1e9) * sol_price
+            usdc_value = token_b / 1e6
+            position.current_value_usd = sol_value + usdc_value
+            position.sol_amount = token_a / 1e9
+            position.usdc_amount = token_b / 1e6
+
+            fee_sol_usd = (fee_owed_a / 1e9) * sol_price
+            fee_usdc = fee_owed_b / 1e6
+            position.fees_earned_usd = fee_sol_usd + fee_usdc
+
+            position.metadata["onchain_liquidity"] = liquidity
+            position.metadata["onchain_fees_sol"] = fee_owed_a / 1e9
+            position.metadata["onchain_fees_usdc"] = fee_owed_b / 1e6
+            position.metadata["last_onchain_sync"] = time.time()
+        except Exception as e:
+            log.warning(f"On-chain sync failed: {e}")
+
     async def update(self, market_data: dict):
         sol_price = market_data.get("sol_price", 0)
         pool_apy = market_data.get("pool_apys", {}).get("orca_sol_usdc", 30.0)
@@ -304,28 +358,32 @@ class LeveragedLPStrategy(BaseStrategy):
             if hours_elapsed <= 0:
                 continue
 
-            rng = position.metadata.get("range_pct", self.base_range)
-            in_range = position.lower_price <= sol_price <= position.upper_price
-            position.in_range = in_range
-
-            if in_range:
-                ratio = sol_price / position.entry_price
-                std_il = 2 * math.sqrt(ratio) / (1 + ratio) - 1
-                rw = (position.upper_price - position.lower_price) / position.entry_price
-                cf = min(2.0 / rw, 10.0) if rw > 0 else 1
-                position.current_value_usd = position.deposit_usd * (1 + std_il * cf)
-
-                concentration = min(0.10 / rng, 8.0)
-                hourly_rate = pool_apy / 100 / 365 / 24 * concentration
-                position.fees_earned_usd += hourly_rate * hours_elapsed * position.deposit_usd
-                position.hours_in_range += hours_elapsed
-            elif sol_price < position.lower_price:
-                sol_at_exit = position.deposit_usd / position.lower_price
-                position.current_value_usd = sol_at_exit * sol_price
-                position.hours_out_of_range += hours_elapsed
+            last_sync = position.metadata.get("last_onchain_sync", 0)
+            if self.mode == "live" and now - last_sync > 60:
+                await self._sync_onchain_position(position, sol_price)
             else:
-                position.current_value_usd = position.deposit_usd
-                position.hours_out_of_range += hours_elapsed
+                rng = position.metadata.get("range_pct", self.base_range)
+                in_range = position.lower_price <= sol_price <= position.upper_price
+                position.in_range = in_range
+
+                if in_range:
+                    ratio = sol_price / position.entry_price
+                    std_il = 2 * math.sqrt(ratio) / (1 + ratio) - 1
+                    rw = (position.upper_price - position.lower_price) / position.entry_price
+                    cf = min(2.0 / rw, 10.0) if rw > 0 else 1
+                    position.current_value_usd = position.deposit_usd * (1 + std_il * cf)
+
+                    concentration = min(0.10 / rng, 8.0)
+                    hourly_rate = pool_apy / 100 / 365 / 24 * concentration
+                    position.fees_earned_usd += hourly_rate * hours_elapsed * position.deposit_usd
+                    position.hours_in_range += hours_elapsed
+                elif sol_price < position.lower_price:
+                    sol_at_exit = position.deposit_usd / position.lower_price
+                    position.current_value_usd = sol_at_exit * sol_price
+                    position.hours_out_of_range += hours_elapsed
+                else:
+                    position.current_value_usd = position.deposit_usd
+                    position.hours_out_of_range += hours_elapsed
 
             borrowed = position.metadata.get("borrowed_usd", 0)
             if borrowed > 0:
