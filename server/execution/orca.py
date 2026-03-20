@@ -619,14 +619,16 @@ class OrcaExecutor:
             pre_ixs.append(self._create_ata_ix(wallet.pubkey(), wallet.pubkey(), usdc_mint))
 
         tick_current = pool_state["tick"]
-        ta0 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current, TICK_SPACING))
-        offset = TICK_SPACING * 88
+        tick_spacing = pool_state["tick_spacing"]
+        ticks_per_array = tick_spacing * 88
+        ta0_start = _tick_array_start(tick_current, tick_spacing)
+        ta0 = _derive_tick_array_pda(pool_pubkey, ta0_start)
         if a_to_b:
-            ta1 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current - offset, TICK_SPACING))
-            ta2 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current - 2 * offset, TICK_SPACING))
+            ta1 = _derive_tick_array_pda(pool_pubkey, ta0_start - ticks_per_array)
+            ta2 = _derive_tick_array_pda(pool_pubkey, ta0_start - 2 * ticks_per_array)
         else:
-            ta1 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current + offset, TICK_SPACING))
-            ta2 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current + 2 * offset, TICK_SPACING))
+            ta1 = _derive_tick_array_pda(pool_pubkey, ta0_start + ticks_per_array)
+            ta2 = _derive_tick_array_pda(pool_pubkey, ta0_start + 2 * ticks_per_array)
 
         oracle_pda, _ = Pubkey.find_program_address(
             [b"oracle", bytes(pool_pubkey)],
