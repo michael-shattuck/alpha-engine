@@ -44,6 +44,7 @@ DISCRIMINATORS = {
     "decrease_liquidity": bytes([0xA0, 0x26, 0xD0, 0x6F, 0x68, 0x5B, 0x2C, 0x01]),
     "collect_fees": bytes([0xA4, 0x98, 0xCF, 0x63, 0x1E, 0xBA, 0x13, 0x31]),
     "close_position": bytes([0x7B, 0x86, 0x51, 0x0C, 0xF8, 0x32, 0x75, 0x68]),
+    "swap": bytes([0xF8, 0xC6, 0x9E, 0x91, 0xE1, 0x75, 0x87, 0xC8]),
 }
 
 
@@ -518,6 +519,109 @@ class OrcaExecutor:
         return {
             "status": "submitted",
             "position_mint": position_mint,
+            "signature": signature,
+        }
+
+    async def swap(
+        self,
+        wallet: Keypair,
+        pool: str,
+        amount: int,
+        a_to_b: bool,
+        slippage_pct: float = 0.01,
+    ) -> dict:
+        pool_pubkey = Pubkey.from_string(pool)
+
+        if self.paper_mode:
+            pool_state = await self.fetch_whirlpool_state(pool)
+            price = pool_state["current_price"]
+            if a_to_b:
+                out_amount = int(amount * price / (10 ** (SOL_DECIMALS - USDC_DECIMALS)))
+            else:
+                out_amount = int(amount * (10 ** (SOL_DECIMALS - USDC_DECIMALS)) / price)
+            return {
+                "status": "simulated",
+                "in_amount": amount,
+                "out_amount": out_amount,
+                "a_to_b": a_to_b,
+                "signature": "simulated_signature",
+            }
+
+        pool_state = await self.fetch_whirlpool_state(pool)
+        sqrt_price_limit = (
+            4295048016 if a_to_b else 79226673515401279992447579055
+        )
+
+        token_vault_a = Pubkey.from_string(pool_state["token_vault_a"])
+        token_vault_b = Pubkey.from_string(pool_state["token_vault_b"])
+        owner_ata_a = _derive_ata(wallet.pubkey(), Pubkey.from_string(SOL_MINT))
+        owner_ata_b = _derive_ata(wallet.pubkey(), Pubkey.from_string(USDC_MINT))
+
+        tick_current = pool_state["tick"]
+        ta0 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current, TICK_SPACING))
+        offset = TICK_SPACING * 88
+        if a_to_b:
+            ta1 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current - offset, TICK_SPACING))
+            ta2 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current - 2 * offset, TICK_SPACING))
+        else:
+            ta1 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current + offset, TICK_SPACING))
+            ta2 = _derive_tick_array_pda(pool_pubkey, _tick_array_start(tick_current + 2 * offset, TICK_SPACING))
+
+        oracle_pda, _ = Pubkey.find_program_address(
+            [b"oracle", bytes(pool_pubkey)],
+            WHIRLPOOL_PROGRAM_ID,
+        )
+
+        swap_data = DISCRIMINATORS["swap"]
+        swap_data += struct.pack("<Q", amount)
+        swap_data += struct.pack("<Q", 0)
+        swap_data += struct.pack("<Q", sqrt_price_limit & 0xFFFFFFFFFFFFFFFF)
+        swap_data += struct.pack("<Q", sqrt_price_limit >> 64)
+        swap_data += struct.pack("<?", True)
+        swap_data += struct.pack("<?", a_to_b)
+
+        swap_ix = Instruction(
+            program_id=WHIRLPOOL_PROGRAM_ID,
+            accounts=[
+                AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=False),
+                AccountMeta(pubkey=pool_pubkey, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=owner_ata_a, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=token_vault_a, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=owner_ata_b, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=token_vault_b, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=ta0, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=ta1, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=ta2, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=oracle_pda, is_signer=False, is_writable=False),
+            ],
+            data=swap_data,
+        )
+
+        blockhash_resp = await self.rpc.get_latest_blockhash()
+        blockhash = blockhash_resp.value.blockhash
+
+        msg = MessageV0.try_compile(
+            payer=wallet.pubkey(),
+            instructions=[
+                set_compute_unit_limit(300_000),
+                set_compute_unit_price(50_000),
+                swap_ix,
+            ],
+            address_lookup_table_accounts=[],
+            recent_blockhash=blockhash,
+        )
+
+        tx = VersionedTransaction(msg, [wallet])
+        result = await self.rpc.send_transaction(tx)
+        signature = str(result.value)
+        log.info("swap tx: %s (a_to_b=%s, amount=%d)", signature, a_to_b, amount)
+        await self._confirm_transaction(signature)
+
+        return {
+            "status": "confirmed",
+            "in_amount": amount,
+            "a_to_b": a_to_b,
             "signature": signature,
         }
 
