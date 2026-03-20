@@ -1,9 +1,11 @@
+import asyncio
 import base64
 import logging
 
 import httpx
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
+from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
@@ -86,13 +88,16 @@ class JupiterExecutor:
         tx_b64 = swap_resp.json()["swapTransaction"]
         tx_bytes = base64.b64decode(tx_b64)
         tx = VersionedTransaction.from_bytes(tx_bytes)
+        signed_tx = VersionedTransaction(tx.message, [wallet])
 
-        result = await self.rpc.send_transaction(tx)
+        result = await self.rpc.send_transaction(signed_tx)
         signature = str(result.value)
         log.info("swap tx: %s", signature)
 
+        await self._confirm_transaction(signature)
+
         return {
-            "status": "submitted",
+            "status": "confirmed",
             "input_mint": input_mint,
             "output_mint": output_mint,
             "in_amount": quote.get("inAmount"),
@@ -100,6 +105,19 @@ class JupiterExecutor:
             "price_impact": quote.get("priceImpactPct"),
             "signature": signature,
         }
+
+    async def _confirm_transaction(self, signature: str, max_retries: int = 30):
+        sig = Signature.from_string(signature)
+        for _ in range(max_retries):
+            resp = await self.rpc.get_signature_statuses([sig])
+            statuses = resp.value
+            if statuses and statuses[0]:
+                if statuses[0].err:
+                    raise Exception(f"Transaction failed: {statuses[0].err}")
+                if statuses[0].confirmation_status:
+                    return
+            await asyncio.sleep(1)
+        raise Exception(f"Transaction not confirmed after {max_retries}s: {signature}")
 
     async def get_jlp_price(self) -> float:
         quote = await self.get_quote(JLP_MINT, USDC_MINT, int(1e6), slippage_bps=100)

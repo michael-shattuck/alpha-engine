@@ -1,3 +1,4 @@
+import asyncio
 import math
 import struct
 import base58
@@ -7,6 +8,7 @@ import logging
 import httpx
 from solders.pubkey import Pubkey
 from solders.keypair import Keypair
+from solders.signature import Signature
 from solders.instruction import Instruction, AccountMeta
 from solders.transaction import VersionedTransaction
 from solders.message import MessageV0
@@ -332,9 +334,10 @@ class OrcaExecutor:
         result = await self.rpc.send_transaction(tx)
         signature = str(result.value)
         log.info("open_position tx: %s", signature)
+        await self._confirm_transaction(signature)
 
         return {
-            "status": "submitted",
+            "status": "confirmed",
             "pool": pool,
             "lower_tick": lower_tick,
             "upper_tick": upper_tick,
@@ -449,9 +452,10 @@ class OrcaExecutor:
         result = await self.rpc.send_transaction(tx)
         signature = str(result.value)
         log.info("close_position tx: %s", signature)
+        await self._confirm_transaction(signature)
 
         return {
-            "status": "submitted",
+            "status": "confirmed",
             "position_mint": position_mint,
             "signature": signature,
         }
@@ -516,6 +520,19 @@ class OrcaExecutor:
             "position_mint": position_mint,
             "signature": signature,
         }
+
+    async def _confirm_transaction(self, signature: str, max_retries: int = 30):
+        sig = Signature.from_string(signature)
+        for _ in range(max_retries):
+            resp = await self.rpc.get_signature_statuses([sig])
+            statuses = resp.value
+            if statuses and statuses[0]:
+                if statuses[0].err:
+                    raise Exception(f"Transaction failed: {statuses[0].err}")
+                if statuses[0].confirmation_status:
+                    return
+            await asyncio.sleep(1)
+        raise Exception(f"Transaction not confirmed after {max_retries}s: {signature}")
 
     async def _fetch_position_data(self, position_mint: Pubkey) -> dict:
         position_pda, _ = _derive_position_pda(position_mint)

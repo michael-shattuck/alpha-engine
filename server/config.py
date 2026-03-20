@@ -35,8 +35,8 @@ FEE_COMPOUND_INTERVAL = 4 * 3600
 DEFAULT_MODE = "paper"
 
 DEFAULT_CAPITAL_ALLOCATION = {
-    "leveraged_lp": 0.80,
-    "volatile_pairs": 0.20,
+    "leveraged_lp": 1.0,
+    "volatile_pairs": 0.0,
 }
 
 RISK_LIMITS = {

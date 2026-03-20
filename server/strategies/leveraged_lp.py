@@ -214,18 +214,22 @@ class LeveragedLPStrategy(BaseStrategy):
 
             balance_resp = await self.orca.rpc.get_balance(self.orca.keypair.pubkey())
             sol_balance = balance_resp.value / 1e9
-            reserve_sol = 0.05
-            available_sol = max(sol_balance - reserve_sol, 0)
+            reserve_sol = 0.1
 
-            if available_sol < 0.01:
-                log.error("Insufficient SOL balance for live execution")
+            target_usd = self.capital_allocated
+            target_sol = target_usd / sol_price
+            available_sol = max(sol_balance - reserve_sol, 0)
+            deposit_sol = min(target_sol, available_sol)
+
+            if deposit_sol < 0.05:
+                log.error(f"Insufficient SOL: have {sol_balance:.4f}, need {target_sol:.4f} + {reserve_sol} reserve")
                 self.error = "insufficient_balance"
                 return None
 
-            deposit_sol = available_sol
             deposit_usd = deposit_sol * sol_price
             sol_for_lp = deposit_sol / 2
             sol_to_swap = deposit_sol / 2
+            log.info(f"Live open: {deposit_sol:.4f} SOL (${deposit_usd:.2f}), swap {sol_to_swap:.4f} SOL to USDC")
 
             try:
                 swap_lamports = int(sol_to_swap * 1e9)
