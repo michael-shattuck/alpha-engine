@@ -360,6 +360,7 @@ class LeveragedLPStrategy(BaseStrategy):
 
             last_sync = position.metadata.get("last_onchain_sync", 0)
             if self.mode == "live" and now - last_sync > 60:
+                await self.init_executors()
                 await self._sync_onchain_position(position, sol_price)
             else:
                 rng = position.metadata.get("range_pct", self.base_range)
