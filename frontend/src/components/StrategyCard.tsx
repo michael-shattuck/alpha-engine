@@ -3,12 +3,16 @@ import type { StrategyState } from '../types'
 import { toggleStrategy } from '../api'
 
 function formatUsd(value: number): string {
-  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 })
+  const abs = Math.abs(value)
+  const decimals = abs < 0.01 ? 6 : abs < 1 ? 4 : 2
+  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: decimals, maximumFractionDigits: decimals })
 }
 
 function formatPercent(value: number): string {
+  const abs = Math.abs(value)
+  const decimals = abs < 0.01 ? 4 : abs < 1 ? 2 : 2
   const sign = value >= 0 ? '+' : ''
-  return `${sign}${value.toFixed(2)}%`
+  return `${sign}${value.toFixed(decimals)}%`
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -109,6 +113,28 @@ export default function StrategyCard({ strategy, onToggled }: Props) {
           </span>
         </div>
       </div>
+
+      {strategy.positions && strategy.positions.length > 0 && (
+        <div className="mt-2.5 space-y-1">
+          {(strategy.positions as Array<Record<string, unknown>>).map((pos, i) => {
+            const mint = (pos.metadata as Record<string, unknown>)?.position_mint as string
+            const inRange = pos.in_range as boolean
+            const lower = pos.lower_price as number
+            const upper = pos.upper_price as number
+            return mint ? (
+              <div key={i} className="flex items-center justify-between text-[10px]">
+                <span className={inRange ? 'text-green-500' : 'text-red-400'}>
+                  {inRange ? 'IN RANGE' : 'OUT OF RANGE'} (${lower?.toFixed(2)} - ${upper?.toFixed(2)})
+                </span>
+                <a href={`https://solscan.io/token/${mint}`} target="_blank" rel="noopener noreferrer"
+                  className="text-blue-400 hover:text-blue-300 underline truncate ml-2" style={{maxWidth: '120px'}}>
+                  {mint.slice(0, 8)}...
+                </a>
+              </div>
+            ) : null
+          })}
+        </div>
+      )}
 
       {strategy.error && (
         <div className="mt-2.5 rounded border border-red-800/50 bg-red-950/30 px-2.5 py-1.5 text-xs text-red-400">
