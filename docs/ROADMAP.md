@@ -77,22 +77,25 @@ Same core logic (leverage + dynamic range + compound) with DEX-specific executio
 
 **Goal:** Deploy the same strategy on EVM chains with concentrated liquidity DEXes.
 
-| Chain | DEX | Pool Type | RPC |
-|-------|-----|-----------|-----|
-| Solana | Orca/Raydium/Meteora | Whirlpool/CLMM/DLMM | Self-hosted (20.120.229.168) |
-| Arbitrum | Uniswap v3 / Camelot | Concentrated | Self-hosted (13.91.71.124:8547) |
-| Ethereum | Uniswap v3 | Concentrated | Self-hosted Erigon (13.91.71.124:8545) |
-| Base | Aerodrome | Concentrated | Need to deploy node |
+**Infrastructure already in place:**
 
-The core strategy is identical -- concentrated LP with leverage, dynamic range, compounding. Only the execution layer changes per chain.
+| Chain | DEX | RPC | Status |
+|-------|-----|-----|--------|
+| Solana | Orca/Raydium/Meteora | Self-hosted (20.120.229.168:8899) | Ready |
+| Arbitrum | Uniswap v3 / Camelot | Self-hosted (13.91.71.124:8547) | Ready |
+| Ethereum | Uniswap v3 | Self-hosted Erigon (13.91.71.124:8545) | Ready |
+| Base | Aerodrome | Need to deploy node | Not yet |
 
-- [ ] EVM execution adapter (ethers.js / web3.py)
-- [ ] Uniswap v3 position management
-- [ ] Chain-specific lending (Aave on Arbitrum/Ethereum)
-- [ ] Cross-chain capital allocation
-- [ ] Chain-specific risk parameters
+RPC infra is 75% done. Only Base node needed. The work is execution adapters:
 
-**Capacity:** Effectively unlimited. Uniswap v3 ETH-USDC has $500M+ TVL.
+- [ ] EVM concentrated LP adapter (Uniswap v3 NonfungiblePositionManager)
+- [ ] Aerodrome adapter (Base -- similar to Uni v3 but with veAERO boost)
+- [ ] Deploy Base RPC node
+- [ ] Chain-specific lending (Aave v3 on Arbitrum/Ethereum for leverage)
+- [ ] Cross-chain capital allocation in orchestrator
+- [ ] Chain-specific risk parameters and gas optimization
+
+**Capacity:** Effectively unlimited. Uniswap v3 ETH-USDC alone has $500M+ TVL.
 
 ## Phase 6: Fund Structure ($10M+)
 
