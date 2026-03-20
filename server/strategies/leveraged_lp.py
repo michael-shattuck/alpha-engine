@@ -6,7 +6,6 @@ from typing import Optional
 from server.strategies.base import BaseStrategy, StrategyPosition
 from server.config import ORCA_WHIRLPOOL_SOL_USDC, SOL_MINT, USDC_MINT
 from server.execution.orca import OrcaExecutor
-from server.execution.jupiter import JupiterExecutor
 
 log = logging.getLogger("leveraged_lp")
 
@@ -26,14 +25,11 @@ class LeveragedLPStrategy(BaseStrategy):
         self.base_range = base_range
         self._price_buffer: list[float] = []
         self.orca: OrcaExecutor | None = None
-        self.jupiter: JupiterExecutor | None = None
 
     async def init_executors(self):
         if self.mode == "live" and not self.orca:
             self.orca = OrcaExecutor(paper_mode=False)
-            self.jupiter = JupiterExecutor(paper_mode=False)
             await self.orca.start()
-            await self.jupiter.start()
 
     def _volatility(self) -> float:
         if len(self._price_buffer) < 3:
@@ -234,24 +230,14 @@ class LeveragedLPStrategy(BaseStrategy):
 
             try:
                 swap_lamports = int(sol_to_swap * 1e9)
-                swap_result = None
-                for attempt in range(3):
-                    try:
-                        swap_result = await self.jupiter.swap(
-                            self.orca.keypair,
-                            SOL_MINT, USDC_MINT,
-                            swap_lamports, slippage_bps=100,
-                        )
-                        break
-                    except Exception as retry_err:
-                        if "429" in str(retry_err) and attempt < 2:
-                            log.warning(f"Jupiter rate limited, retry {attempt+1}/3")
-                            import asyncio
-                            await asyncio.sleep(5 * (attempt + 1))
-                        else:
-                            raise
-                log.info(f"Live swap SOL->USDC: {swap_result.get('signature')}")
-                usdc_amount = int(swap_result.get("out_amount", 0)) / 1e6
+                swap_result = await self.orca.swap(
+                    self.orca.keypair,
+                    ORCA_WHIRLPOOL_SOL_USDC,
+                    swap_lamports,
+                    a_to_b=True,
+                )
+                log.info(f"Live swap SOL->USDC via Orca: {swap_result.get('signature')}")
+                usdc_amount = sol_to_swap * sol_price
             except Exception as e:
                 log.error(f"Live swap failed: {e}")
                 self.error = str(e)
