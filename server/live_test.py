@@ -28,6 +28,7 @@ sys.path.insert(0, ".")
 
 from server.config import SOLANA_RPC_URL, WALLET_PRIVATE_KEY, ORCA_WHIRLPOOL_SOL_USDC, SOL_MINT, USDC_MINT
 from server.execution.orca import OrcaExecutor
+from server.execution.jupiter import JupiterExecutor
 
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
@@ -114,22 +115,33 @@ async def run_test():
     if not has_usdc_ata:
         print("  NOTE: USDC ATA doesn't exist. Swap will create it via wrapAndUnwrapSol.")
 
-    # === TEST 4: Swap 0.05 SOL -> USDC via Orca ===
-    print("\nStep 4: Swap 0.05 SOL -> USDC via Orca direct swap")
+    # === TEST 4: Swap 0.05 SOL -> USDC via Jupiter ===
+    print("\nStep 4: Swap 0.05 SOL -> USDC via Jupiter")
+    jupiter = JupiterExecutor(paper_mode=False)
+    await jupiter.start()
     swap_amount = int(0.05 * 1e9)
     try:
-        swap_result = await orca.swap(kp, ORCA_WHIRLPOOL_SOL_USDC, swap_amount, a_to_b=True)
+        swap_result = None
+        for attempt in range(3):
+            try:
+                swap_result = await jupiter.swap(kp, SOL_MINT, USDC_MINT, swap_amount, slippage_bps=100)
+                break
+            except Exception as retry_err:
+                if "429" in str(retry_err) and attempt < 2:
+                    print(f"  Rate limited, retry {attempt+1}/3...")
+                    await asyncio.sleep(5 * (attempt + 1))
+                else:
+                    raise
         sig = swap_result.get("signature", "")
         status = swap_result.get("status", "")
-        record("Orca swap", status == "confirmed", f"sig={sig[:20]}... status={status}")
+        record("Jupiter swap", status == "confirmed", f"sig={sig[:20]}... status={status}")
     except Exception as e:
-        record("Orca swap", False, str(e))
-        print(f"\n  SWAP FAILED. This is the most common failure point.")
-        print(f"  Error: {e}")
-        print(f"  The Orca swap instruction may need account layout fixes.")
+        record("Jupiter swap", False, str(e)[:100])
+        print(f"\n  SWAP FAILED: {e}")
         print(f"\n  Remaining tests skipped.")
         await rpc.close()
         await orca.stop()
+        await jupiter.stop()
         return results
 
     # === TEST 5: Verify USDC received ===
