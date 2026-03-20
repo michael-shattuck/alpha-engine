@@ -358,11 +358,7 @@ class LeveragedLPStrategy(BaseStrategy):
             if hours_elapsed <= 0:
                 continue
 
-            last_sync = position.metadata.get("last_onchain_sync", 0)
-            if self.mode == "live" and now - last_sync > 60:
-                await self.init_executors()
-                await self._sync_onchain_position(position, sol_price)
-            else:
+            if True:
                 rng = position.metadata.get("range_pct", self.base_range)
                 in_range = position.lower_price <= sol_price <= position.upper_price
                 position.in_range = in_range
