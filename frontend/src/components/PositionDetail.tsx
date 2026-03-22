@@ -11,7 +11,7 @@ interface Props {
 }
 
 export default function PositionDetail({ status }: Props) {
-  const positions = Object.values(status.strategies)
+  const positions: Array<Record<string, unknown>> = Object.values(status.strategies)
     .flatMap(s => (s.positions as Array<Record<string, unknown>>)?.map(p => ({ ...p, strategyName: s.name })) ?? [])
     .filter(p => p.metadata)
 
