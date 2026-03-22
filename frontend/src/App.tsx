@@ -7,6 +7,7 @@ import MarketPanel from './components/MarketPanel'
 import EventLog from './components/EventLog'
 import RiskPanel from './components/RiskPanel'
 import ControlPanel from './components/ControlPanel'
+import PositionDetail from './components/PositionDetail'
 
 function ConnectionError({ message }: { message: string }) {
   return (
@@ -98,6 +99,7 @@ export default function App() {
               </div>
             </div>
 
+            <PositionDetail status={portfolioStatus} />
             {events.data && <EventLog events={events.data} />}
           </div>
 
