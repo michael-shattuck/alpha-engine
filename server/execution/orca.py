@@ -379,16 +379,19 @@ class OrcaExecutor:
         pool_pubkey = Pubkey.from_string(ORCA_WHIRLPOOL_SOL_USDC)
         token_vault_a = Pubkey.from_string(pool_state["token_vault_a"])
         token_vault_b = Pubkey.from_string(pool_state["token_vault_b"])
-        owner_ata_a = _derive_ata(wallet.pubkey(), Pubkey.from_string(SOL_MINT))
-        owner_ata_b = _derive_ata(wallet.pubkey(), Pubkey.from_string(USDC_MINT))
+        sol_mint = Pubkey.from_string(SOL_MINT)
+        usdc_mint = Pubkey.from_string(USDC_MINT)
+        owner_ata_a = _derive_ata(wallet.pubkey(), sol_mint)
+        owner_ata_b = _derive_ata(wallet.pubkey(), usdc_mint)
 
         position_data = await self._fetch_position_data(mint_pubkey)
 
+        tick_spacing = pool_state["tick_spacing"]
         tick_array_lower = _derive_tick_array_pda(
-            pool_pubkey, _tick_array_start(position_data["tick_lower"], TICK_SPACING)
+            pool_pubkey, _tick_array_start(position_data["tick_lower"], tick_spacing)
         )
         tick_array_upper = _derive_tick_array_pda(
-            pool_pubkey, _tick_array_start(position_data["tick_upper"], TICK_SPACING)
+            pool_pubkey, _tick_array_start(position_data["tick_upper"], tick_spacing)
         )
 
         decrease_data = DISCRIMINATORS["decrease_liquidity"]
@@ -444,18 +447,30 @@ class OrcaExecutor:
             data=DISCRIMINATORS["close_position"],
         )
 
+        pre_ixs = []
+        ata_a_resp = await self.rpc.get_account_info(owner_ata_a)
+        if not ata_a_resp.value:
+            pre_ixs.append(self._create_ata_ix(wallet.pubkey(), wallet.pubkey(), sol_mint))
+
+        ata_b_resp = await self.rpc.get_account_info(owner_ata_b)
+        if not ata_b_resp.value:
+            pre_ixs.append(self._create_ata_ix(wallet.pubkey(), wallet.pubkey(), usdc_mint))
+
+        post_ixs = [self._close_account_ix(owner_ata_a, wallet.pubkey(), wallet.pubkey())]
+
         blockhash_resp = await self.rpc.get_latest_blockhash()
         blockhash = blockhash_resp.value.blockhash
 
         msg = MessageV0.try_compile(
             payer=wallet.pubkey(),
             instructions=[
-                set_compute_unit_limit(400_000),
+                set_compute_unit_limit(500_000),
                 set_compute_unit_price(50_000),
+            ] + pre_ixs + [
                 decrease_ix,
                 collect_ix,
                 close_ix,
-            ],
+            ] + post_ixs,
             address_lookup_table_accounts=[],
             recent_blockhash=blockhash,
         )
