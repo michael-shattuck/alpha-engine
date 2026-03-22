@@ -11,9 +11,10 @@ interface Props {
 }
 
 export default function PositionDetail({ status }: Props) {
-  const positions: Array<Record<string, unknown>> = Object.values(status.strategies)
-    .flatMap(s => (s.positions as Array<Record<string, unknown>>)?.map(p => ({ ...p, strategyName: s.name })) ?? [])
-    .filter(p => p.metadata)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const positions: any[] = Object.values(status.strategies)
+    .flatMap(s => ((s.positions ?? []) as any[]).map((p: any) => ({ ...p, strategyName: s.name })))
+    .filter((p: any) => p.metadata)
 
   if (positions.length === 0) {
     return (
