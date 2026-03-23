@@ -91,7 +91,9 @@ class BaseStrategy(ABC):
     def load_state(self, state: dict):
         self.enabled = state.get("enabled", True)
         self.mode = state.get("mode", self.mode)
-        self.capital_allocated = state.get("capital_allocated", 0.0)
+        saved_capital = state.get("capital_allocated", 0.0)
+        if saved_capital > self.capital_allocated:
+            self.capital_allocated = saved_capital
         self.target_allocation = state.get("target_allocation", 0.0)
         self.status = state.get("status", "idle")
         self.error = state.get("error", "")

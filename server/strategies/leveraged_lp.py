@@ -7,6 +7,7 @@ from server.strategies.base import BaseStrategy, StrategyPosition
 from server.config import ORCA_WHIRLPOOL_SOL_USDC, SOL_MINT, USDC_MINT
 from server.execution.orca import OrcaExecutor
 from server.execution.marginfi import MarginFiLender
+from server.alerts import alerts
 
 log = logging.getLogger("leveraged_lp")
 
@@ -302,6 +303,8 @@ class LeveragedLPStrategy(BaseStrategy):
                     self._last_error_time = time.time()
                 if pos.metadata.get("borrowed_usd", 0) > 0 and self.lender:
                     await self._repay_leverage(sol_price)
+                pnl = pos.current_value_usd + pos.fees_earned_usd - pos.metadata.get("equity", 0)
+                await alerts.position_closed("deleverage", pnl)
             self.close_position(action["position_id"])
             self.status = "idle"
             return None
@@ -322,11 +325,13 @@ class LeveragedLPStrategy(BaseStrategy):
                     self.close_position(action["position_id"])
                     log.info(f"Position closed for {act}. Capital=${self.capital_allocated:.2f}. Will reopen after cooldown.")
                     self.status = "idle"
+                    await alerts.rebalance(act, self.capital_allocated)
                 except Exception as e:
                     log.error(f"REBALANCE CLOSE FAILED - DISABLING STRATEGY: {e}")
                     self.error = f"REBALANCE_FAILED: {str(e)[:100]}"
                     self.enabled = False
                     self._last_error_time = time.time()
+                    await alerts.error_alert(f"{act}_close", str(e))
             return None
 
         if act == "compound":
@@ -350,6 +355,7 @@ class LeveragedLPStrategy(BaseStrategy):
                     self.error = f"COMPOUND_FAILED: {str(e)[:100]}"
                     self.enabled = False
                     self._last_error_time = time.time()
+                    await alerts.error_alert("compound_close", str(e))
             return None
 
         if act == "open":
@@ -487,6 +493,7 @@ class LeveragedLPStrategy(BaseStrategy):
 
             self._record_action()
             self._has_opened_live = True
+            await alerts.position_opened(equity_usd, lev if borrowed_usdc > 0 else 1.0, borrowed_usdc, rng)
 
             position = StrategyPosition(
                 id=f"{self.STRATEGY_ID}_{int(time.time())}",
@@ -515,22 +522,32 @@ class LeveragedLPStrategy(BaseStrategy):
         return None
 
     async def _repay_leverage(self, sol_price: float):
-        if not self.lender or self.lender.borrowed_usdc <= 0:
+        if not self.lender:
             return
+        await self.lender.recover_state()
+        if self.lender.borrowed_usdc <= 0 and self.lender.deposited_sol <= 0:
+            return
+        if self.lender.borrowed_usdc > 0:
+            try:
+                usdc_owed = self.lender.borrowed_usdc
+                swap_sol = (usdc_owed * 1.05) / sol_price
+                balance_resp = await self.orca.rpc.get_balance(self.orca.keypair.pubkey())
+                available_sol = balance_resp.value / 1e9 - 0.05
+                swap_sol = min(swap_sol, max(available_sol, 0))
+                if swap_sol > 0.001:
+                    swap_lamports = int(swap_sol * 1e9)
+                    swap_result = await self.orca.swap(
+                        self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
+                        swap_lamports, a_to_b=True,
+                    )
+                    log.info(f"Swapped {swap_sol:.4f} SOL->USDC for repay: {swap_result.get('signature')}")
+            except Exception as e:
+                log.error(f"SOL->USDC swap for repay failed: {e}")
         try:
-            usdc_owed = self.lender.borrowed_usdc
-            swap_sol = (usdc_owed * 1.02) / sol_price
-            swap_lamports = int(swap_sol * 1e9)
-            swap_result = await self.orca.swap(
-                self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
-                swap_lamports, a_to_b=True,
-            )
-            log.info(f"Swapped SOL->USDC for repay: {swap_result.get('signature')}")
-
             result = await self.lender.repay_and_withdraw(self.orca.keypair)
             log.info(f"MarginFi repay+withdraw: {result}")
         except Exception as e:
-            log.error(f"MarginFi repay failed: {e}")
+            log.error(f"MarginFi repay+withdraw failed: {e}")
             self.error = f"REPAY_FAILED: {str(e)[:100]}"
 
     async def update(self, market_data: dict):

@@ -15,6 +15,7 @@ from server.strategies.leveraged_lp import LeveragedLPStrategy
 from server.strategies.volatile_pairs import VolatilePairsStrategy
 from server.strategies.adaptive_range import AdaptiveRangeStrategy
 from server.strategies.funding_arb import FundingArbStrategy
+from server.alerts import alerts
 
 log = logging.getLogger("api")
 
@@ -204,6 +205,71 @@ async def estimate_exit_cost():
         "estimated_tx_fees": tx_fees,
         "estimated_total_cost": total_cost,
         "cost_percent": (total_cost / total_deployed * 100) if total_deployed > 0 else 0,
+    }
+
+
+@app.get("/api/wallet")
+async def get_wallet():
+    lp = orchestrator.strategies.get("leveraged_lp")
+    sol_balance = 0.0
+    usdc_balance = 0.0
+    marginfi_state = {"deposited_sol": 0, "borrowed_usdc": 0, "has_position": False}
+
+    if lp and hasattr(lp, "orca") and lp.orca and lp.orca.rpc:
+        try:
+            from solders.pubkey import Pubkey
+            bal = await lp.orca.rpc.get_balance(lp.orca.keypair.pubkey())
+            sol_balance = bal.value / 1e9
+
+            usdc_mint = Pubkey.from_string("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+            token_prog = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+            ata_prog = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+            usdc_ata, _ = Pubkey.find_program_address(
+                [bytes(lp.orca.keypair.pubkey()), bytes(token_prog), bytes(usdc_mint)], ata_prog
+            )
+            import httpx
+            async with httpx.AsyncClient(timeout=10) as http:
+                r = await http.post("https://mainnet.helius-rpc.com/?api-key=92dc56e5-bd3e-402e-b30c-9c949008b793", json={
+                    "jsonrpc": "2.0", "id": 1, "method": "getTokenAccountBalance",
+                    "params": [str(usdc_ata)]
+                })
+                result = r.json().get("result", {}).get("value", {})
+                usdc_balance = float(result.get("uiAmount", 0) or 0)
+        except Exception:
+            pass
+
+    if lp and hasattr(lp, "lender") and lp.lender:
+        marginfi_state = lp.lender.get_state()
+
+    return {
+        "sol_balance": sol_balance,
+        "usdc_balance": usdc_balance,
+        "sol_price": orchestrator.prices.sol_price,
+        "total_usd": sol_balance * orchestrator.prices.sol_price + usdc_balance,
+        "marginfi": marginfi_state,
+    }
+
+
+@app.get("/api/alerts")
+async def get_alerts(limit: int = 100):
+    return alerts.get_history(limit)
+
+
+@app.get("/api/health")
+async def get_health():
+    now = __import__("time").time()
+    last_price = orchestrator.prices.last_price_update
+    price_stale = (now - last_price) > 120 if last_price > 0 else True
+    return {
+        "status": "ok" if not price_stale else "degraded",
+        "price_stale": price_stale,
+        "last_price_update": last_price,
+        "seconds_since_price": now - last_price if last_price > 0 else -1,
+        "uptime_hours": (now - orchestrator.state.portfolio.started_at) / 3600,
+        "circuit_breaker": orchestrator.state.portfolio.circuit_breaker_active,
+        "strategies_with_errors": [
+            sid for sid, s in orchestrator.strategies.items() if s.error
+        ],
     }
 
 

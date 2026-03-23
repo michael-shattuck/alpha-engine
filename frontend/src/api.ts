@@ -43,3 +43,30 @@ export function updateAllocation(allocations: Record<string, number>): Promise<v
     body: JSON.stringify({ allocations }),
   })
 }
+
+export interface WalletInfo {
+  sol_balance: number
+  usdc_balance: number
+  sol_price: number
+  total_usd: number
+  marginfi: {
+    deposited_sol: number
+    borrowed_usdc: number
+    has_position: boolean
+  }
+}
+
+export interface AlertEntry {
+  timestamp: number
+  level: string
+  title: string
+  message: string
+}
+
+export function fetchWallet(): Promise<WalletInfo> {
+  return request<WalletInfo>('/api/wallet')
+}
+
+export function fetchAlerts(): Promise<AlertEntry[]> {
+  return request<AlertEntry[]>('/api/alerts')
+}

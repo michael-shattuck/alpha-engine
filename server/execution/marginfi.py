@@ -45,6 +45,9 @@ DISC = {
 
 MFI_ACCOUNT = Pubkey.from_string("C9qzJQLMw2CK8nYMiHVUcKRXjgeG6zsZdUQpPBZh6G6o")
 
+BALANCE_SLOT_SIZE = 104
+BALANCE_OFFSET = 8 + 32 + 32 + 1
+
 
 def _derive_ata(owner: Pubkey, mint: Pubkey) -> Pubkey:
     pda, _ = Pubkey.find_program_address(
@@ -69,6 +72,11 @@ def _create_ata_ix(payer: Pubkey, owner: Pubkey, mint: Pubkey) -> Instruction:
     )
 
 
+def _parse_wrapped_i80f48(data: bytes, offset: int) -> float:
+    raw = int.from_bytes(data[offset:offset + 16], "little", signed=True)
+    return raw / (2 ** 48)
+
+
 class MarginFiLender:
     def __init__(self, paper_mode: bool = True):
         self.paper_mode = paper_mode
@@ -81,10 +89,56 @@ class MarginFiLender:
         self.rpc = AsyncClient(HELIUS_RPC, commitment=Confirmed)
         if WALLET_PRIVATE_KEY:
             self.keypair = Keypair.from_bytes(base58.b58decode(WALLET_PRIVATE_KEY))
+        if not self.paper_mode:
+            await self.recover_state()
 
     async def stop(self):
         if self.rpc:
             await self.rpc.close()
+
+    async def recover_state(self):
+        try:
+            resp = await self.rpc.get_account_info(MFI_ACCOUNT)
+            if not resp.value:
+                log.info("MarginFi account not found on-chain, starting fresh")
+                return
+
+            data = bytes(resp.value.data)
+            if len(data) < BALANCE_OFFSET + BALANCE_SLOT_SIZE:
+                log.warning(f"MarginFi account data too short: {len(data)} bytes")
+                return
+
+            sol_deposit = 0.0
+            usdc_borrow = 0.0
+
+            for i in range(16):
+                slot_start = BALANCE_OFFSET + i * BALANCE_SLOT_SIZE
+                if slot_start + BALANCE_SLOT_SIZE > len(data):
+                    break
+
+                active = data[slot_start]
+                if not active:
+                    continue
+
+                bank_pk = Pubkey.from_bytes(data[slot_start + 1:slot_start + 33])
+                asset_shares = _parse_wrapped_i80f48(data, slot_start + 33)
+                liability_shares = _parse_wrapped_i80f48(data, slot_start + 33 + 16)
+
+                if bank_pk == SOL_BANK and asset_shares > 0.001:
+                    sol_deposit = asset_shares
+                    log.info(f"Recovered MarginFi SOL deposit: {sol_deposit:.6f} share-units")
+
+                if bank_pk == USDC_BANK and liability_shares > 0.001:
+                    usdc_borrow = liability_shares
+                    log.info(f"Recovered MarginFi USDC borrow: {usdc_borrow:.6f} share-units")
+
+            self.deposited_sol = sol_deposit
+            self.borrowed_usdc = usdc_borrow
+
+            if sol_deposit > 0 or usdc_borrow > 0:
+                log.warning(f"MarginFi state recovered: deposited_sol={sol_deposit:.4f}, borrowed_usdc={usdc_borrow:.4f}")
+        except Exception as e:
+            log.error(f"MarginFi state recovery failed: {e}")
 
     def _accrue_ix(self, bank: Pubkey) -> Instruction:
         return Instruction(
@@ -119,7 +173,6 @@ class MarginFiLender:
         usdc_atoms = int(usdc_borrow * 1e6)
         vault_auth, _ = Pubkey.find_program_address([b"liquidity_vault_auth", bytes(USDC_BANK)], MARGINFI_PROGRAM)
 
-        # TX 1: Accrue + Deposit
         deposit_ixs = [set_compute_unit_limit(600_000), set_compute_unit_price(100_000)]
         deposit_ixs.append(self._accrue_ix(SOL_BANK))
         deposit_ixs.append(self._accrue_ix(USDC_BANK))
@@ -165,7 +218,6 @@ class MarginFiLender:
 
         await asyncio.sleep(2)
 
-        # TX 2: Borrow (oracles now fresh from accrue in TX 1)
         borrow_ixs = [set_compute_unit_limit(400_000), set_compute_unit_price(100_000)]
         borrow_ixs.append(Instruction(
             program_id=MARGINFI_PROGRAM,
@@ -272,6 +324,13 @@ class MarginFiLender:
 
     def get_max_borrow(self, collateral_sol: float, sol_price: float, ltv: float = 0.65) -> float:
         return collateral_sol * sol_price * ltv
+
+    def get_state(self) -> dict:
+        return {
+            "deposited_sol": self.deposited_sol,
+            "borrowed_usdc": self.borrowed_usdc,
+            "has_position": self.deposited_sol > 0 or self.borrowed_usdc > 0,
+        }
 
     async def _confirm(self, signature: str, max_retries: int = 30):
         sig_str = signature.replace("SendTransactionResp(Signature(", "").replace("))", "")

@@ -15,6 +15,7 @@ from server.execution.prices import PriceService
 from server.strategies.base import BaseStrategy
 from server.risk.guardian import Guardian
 from server.intelligence import AIOrchestrator as AI
+from server.alerts import alerts
 
 log = logging.getLogger("orchestrator")
 
@@ -45,6 +46,7 @@ class Orchestrator:
     async def start(self):
         log.info(f"Starting orchestrator: mode={self.mode}, capital=${self.capital:.2f}")
         await self.prices.start()
+        await alerts.start()
         self.running = True
 
         self.state.portfolio.total_capital = self.capital
@@ -79,6 +81,7 @@ class Orchestrator:
         self.running = False
         self._save_all_states()
         await self.prices.stop()
+        await alerts.stop()
 
     async def _main_loop(self):
         while self.running:
@@ -150,6 +153,13 @@ class Orchestrator:
 
         assessment = self.guardian.assess(portfolio_data, market_data)
         self.state.portfolio.risk_level = assessment["risk_level"]
+
+        if assessment["risk_level"] in ("high", "critical"):
+            await alerts.risk_alert(
+                assessment["risk_level"],
+                assessment.get("drawdown_pct", 0),
+                f"actions={len(assessment.get('actions', []))}",
+            )
 
         decision = self.ai.decide(portfolio_data, market_data, assessment)
 

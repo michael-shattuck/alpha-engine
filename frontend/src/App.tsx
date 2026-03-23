@@ -1,5 +1,5 @@
 import { usePolling } from './hooks/usePolling'
-import { fetchStatus, fetchHistory, fetchEvents, fetchMarket } from './api'
+import { fetchStatus, fetchHistory, fetchEvents, fetchMarket, fetchWallet, fetchAlerts } from './api'
 import PortfolioSummary from './components/PortfolioSummary'
 import StrategyCard from './components/StrategyCard'
 import PerformanceChart from './components/PerformanceChart'
@@ -8,6 +8,8 @@ import EventLog from './components/EventLog'
 import RiskPanel from './components/RiskPanel'
 import ControlPanel from './components/ControlPanel'
 import PositionDetail from './components/PositionDetail'
+import WalletPanel from './components/WalletPanel'
+import AlertLog from './components/AlertLog'
 
 function ConnectionError({ message }: { message: string }) {
   return (
@@ -34,6 +36,8 @@ export default function App() {
   const history = usePolling(fetchHistory, 30000)
   const events = usePolling(fetchEvents, 5000)
   const market = usePolling(fetchMarket, 10000)
+  const wallet = usePolling(fetchWallet, 15000)
+  const alertLog = usePolling(fetchAlerts, 10000)
 
   if (status.loading && !status.data) return <LoadingScreen />
   if (status.error && !status.data) return <ConnectionError message={status.error} />
@@ -100,11 +104,13 @@ export default function App() {
             </div>
 
             <PositionDetail status={portfolioStatus} />
+            {alertLog.data && alertLog.data.length > 0 && <AlertLog alerts={alertLog.data} />}
             {events.data && <EventLog events={events.data} />}
           </div>
 
           <div className="space-y-5">
             <ControlPanel status={portfolioStatus} onRefresh={status.refresh} />
+            {wallet.data && <WalletPanel wallet={wallet.data} />}
             <RiskPanel status={portfolioStatus} />
             {market.data && <MarketPanel market={market.data} />}
           </div>

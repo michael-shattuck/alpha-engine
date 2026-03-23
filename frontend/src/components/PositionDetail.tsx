@@ -42,11 +42,25 @@ export default function PositionDetail({ status }: Props) {
           const solAmount = pos.sol_amount as number
           const usdcAmount = pos.usdc_amount as number
           const rangePct = meta?.range_pct as number
+          const leverage = (meta?.leverage as number) ?? 1.0
+          const borrowed = (meta?.borrowed_usd as number) ?? 0
+          const equity = (meta?.equity as number) ?? deposit
+
+          const net = value + fees - borrowed
+          const healthFactor = borrowed > 0 ? net / borrowed : 999
+          const liqPrice = borrowed > 0 && lower > 0 ? lower * 0.85 : 0
 
           return (
             <div key={i} className="rounded border border-gray-800 bg-gray-950/50 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-medium text-gray-200">{pos.strategyName as string}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-200">{pos.strategyName as string}</span>
+                  {leverage > 1 && (
+                    <span className="rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-purple-400 border border-purple-500/30">
+                      {leverage.toFixed(1)}x
+                    </span>
+                  )}
+                </div>
                 <span className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                   inRange
                     ? 'bg-green-500/15 text-green-400 border border-green-500/30'
@@ -56,19 +70,53 @@ export default function PositionDetail({ status }: Props) {
                 </span>
               </div>
 
-              <div className="mb-3 grid grid-cols-2 gap-3">
+              <div className="mb-3 grid grid-cols-3 gap-3">
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Deposited</div>
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Equity</div>
+                  <div className="font-mono text-sm font-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatUsd(equity)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Total Deployed</div>
                   <div className="font-mono text-sm font-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {formatUsd(deposit)}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Current Value</div>
-                  <div className="font-mono text-sm font-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    {formatUsd(value)}
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Net Value</div>
+                  <div className={`font-mono text-sm font-medium ${net >= equity ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatUsd(net)}
                   </div>
                 </div>
+              </div>
+
+              {borrowed > 0 && (
+                <div className="mb-3 grid grid-cols-3 gap-3 rounded bg-gray-900/50 p-2">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">Borrowed</div>
+                    <div className="font-mono text-xs text-red-400" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {formatUsd(borrowed)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">Health Factor</div>
+                    <div className={`font-mono text-xs font-medium ${
+                      healthFactor > 2 ? 'text-green-400' : healthFactor > 1.3 ? 'text-yellow-400' : 'text-red-400'
+                    }`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {healthFactor > 100 ? 'SAFE' : healthFactor.toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500">Liq. Price (est)</div>
+                    <div className="font-mono text-xs text-red-400" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {liqPrice > 0 ? formatUsd(liqPrice) : 'N/A'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mb-3 grid grid-cols-3 gap-3">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-gray-500">Fees Earned</div>
                   <div className="font-mono text-sm font-medium text-green-400" style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -79,6 +127,12 @@ export default function PositionDetail({ status }: Props) {
                   <div className="text-[10px] uppercase tracking-wider text-gray-500">Entry Price</div>
                   <div className="font-mono text-sm font-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {formatUsd(entry)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Current Price</div>
+                  <div className="font-mono text-sm font-medium" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatUsd(status.sol_price)}
                   </div>
                 </div>
               </div>
