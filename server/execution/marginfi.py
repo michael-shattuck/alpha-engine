@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import struct
 import logging
 import base58
@@ -66,20 +67,23 @@ class MarginFiLender:
         if self.marginfi_account:
             return self.marginfi_account
 
+        import httpx
         disc = hashlib.sha256(b"account:MarginfiAccount").digest()[:8]
+        disc_b64 = base64.b64encode(disc).decode()
+        owner_b58 = str(wallet.pubkey())
 
-        resp = await self.rpc.get_program_accounts(
-            MARGINFI_PROGRAM,
-            encoding="base64",
-            filters=[
-                {"memcmp": {"offset": 0, "bytes": base58.b58encode(disc).decode()}},
-                {"memcmp": {"offset": 40, "bytes": str(wallet.pubkey())}},
-            ],
-            data_slice={"offset": 0, "length": 8},
-        )
+        async with httpx.AsyncClient(timeout=30) as http:
+            r = await http.post(HELIUS_RPC, json={
+                "jsonrpc": "2.0", "id": 1, "method": "getProgramAccounts",
+                "params": [str(MARGINFI_PROGRAM), {"encoding": "base64", "filters": [
+                    {"memcmp": {"offset": 0, "bytes": disc_b64, "encoding": "base64"}},
+                    {"memcmp": {"offset": 40, "bytes": owner_b58}},
+                ], "dataSlice": {"offset": 0, "length": 8}}]
+            })
+            accounts = r.json().get("result", [])
 
-        if resp.value:
-            self.marginfi_account = resp.value[0].pubkey
+        if accounts:
+            self.marginfi_account = Pubkey.from_string(accounts[0]["pubkey"])
             log.info(f"Found existing MarginFi account: {self.marginfi_account}")
             return self.marginfi_account
 
