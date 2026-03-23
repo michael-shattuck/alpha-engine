@@ -318,6 +318,11 @@ class LeveragedLPStrategy(BaseStrategy):
             return None
 
         if act == "open":
+            await self.recover_onchain_positions(sol_price)
+            if self.active_positions:
+                log.warning("BLOCKED OPEN: on-chain position already exists. Not opening another.")
+                return None
+
             rng = self._optimal_range()
             lower_price = sol_price * (1 - rng)
             upper_price = sol_price * (1 + rng)
