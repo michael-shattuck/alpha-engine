@@ -158,10 +158,41 @@ class MarginFiLender:
         account = await self._find_or_create_marginfi_account(wallet)
         sol_mint = Pubkey.from_string(SOL_MINT)
         signer_ata = _derive_ata(wallet.pubkey(), sol_mint)
+        ATA_PROGRAM = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
 
         bank_liquidity_vault = await self._get_bank_vault(SOL_BANK, BANK_LIQUIDITY_VAULT_OFFSET)
 
-        ix = Instruction(
+        pre_ixs = []
+        ata_resp = await self.rpc.get_account_info(signer_ata)
+        if not ata_resp.value:
+            pre_ixs.append(Instruction(
+                program_id=ATA_PROGRAM,
+                accounts=[
+                    AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=True),
+                    AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
+                    AccountMeta(pubkey=wallet.pubkey(), is_signer=False, is_writable=False),
+                    AccountMeta(pubkey=sol_mint, is_signer=False, is_writable=False),
+                    AccountMeta(pubkey=SYSTEM_PROGRAM, is_signer=False, is_writable=False),
+                    AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
+                ],
+                data=bytes(),
+            ))
+
+        pre_ixs.append(Instruction(
+            program_id=SYSTEM_PROGRAM,
+            accounts=[
+                AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=True),
+                AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
+            ],
+            data=struct.pack("<IQ", 2, lamports),
+        ))
+        pre_ixs.append(Instruction(
+            program_id=TOKEN_PROGRAM,
+            accounts=[AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True)],
+            data=bytes([17]),
+        ))
+
+        deposit_ix = Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
                 AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
@@ -178,7 +209,7 @@ class MarginFiLender:
         blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
         msg = MessageV0.try_compile(
             payer=wallet.pubkey(),
-            instructions=[set_compute_unit_limit(300_000), set_compute_unit_price(50_000), ix],
+            instructions=[set_compute_unit_limit(400_000), set_compute_unit_price(50_000)] + pre_ixs + [deposit_ix],
             address_lookup_table_accounts=[],
             recent_blockhash=blockhash,
         )
