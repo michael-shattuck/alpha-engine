@@ -15,6 +15,7 @@ from solders.compute_budget import set_compute_unit_limit, set_compute_unit_pric
 from solders.system_program import ID as SYSTEM_PROGRAM
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
+from solana.rpc.types import TxOpts
 
 from server.config import WALLET_PRIVATE_KEY, SOL_MINT, USDC_MINT
 
@@ -24,9 +25,14 @@ MARGINFI_PROGRAM = Pubkey.from_string("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVa
 MARGINFI_GROUP = Pubkey.from_string("4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8")
 SOL_BANK = Pubkey.from_string("CCKtUs6Cgwo4aaQUmBPmyoApH2gUDErxNZCAntD6LYGh")
 USDC_BANK = Pubkey.from_string("2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB")
+SOL_VAULT = Pubkey.from_string("2eicbpitfJXDwqCuFAmPgDP7t2oUotnAzbGzRKLMgSLe")
+USDC_VAULT = Pubkey.from_string("7jaiZR5Sk8hdYN9MxTpczTcwbWpb5WEoxSANuUwveuat")
+SOL_ORACLE = Pubkey.from_string("4Hmd6PdjVA9auCoScE12iaBogfwS4ZXQ6VZoBeqanwWW")
+USDC_ORACLE = Pubkey.from_string("Dpw1EAVrSB1ibxiDQyTAW6Zip3J4Btk2x4SgApQCeFbX")
 TOKEN_PROGRAM = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+ATA_PROGRAM = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
 
-HELIUS_RPC = "https://johnath-nf0ci1-fast-mainnet.helius-rpc.com"
+HELIUS_RPC = "https://mainnet.helius-rpc.com/?api-key=92dc56e5-bd3e-402e-b30c-9c949008b793"
 
 DISC = {
     "init_account": hashlib.sha256(b"global:marginfi_account_initialize").digest()[:8],
@@ -34,46 +40,33 @@ DISC = {
     "borrow": hashlib.sha256(b"global:lending_account_borrow").digest()[:8],
     "repay": hashlib.sha256(b"global:lending_account_repay").digest()[:8],
     "withdraw": hashlib.sha256(b"global:lending_account_withdraw").digest()[:8],
+    "accrue": hashlib.sha256(b"global:lending_pool_accrue_bank_interest").digest()[:8],
 }
 
-BANK_LIQUIDITY_VAULT_OFFSET = 112
-BANK_ORACLE_SETUP_OFFSET = 617
-BANK_ORACLE_KEYS_OFFSET = 610
-MAX_ORACLE_KEYS = 5
-MARGINFI_ACCOUNT_BALANCES_OFFSET = 72
-BALANCE_SIZE = 104
-MAX_BALANCES = 16
-BALANCE_ACTIVE_OFFSET = 0
-BALANCE_BANK_PK_OFFSET = 1
-ZERO_PUBKEY = Pubkey.from_string("11111111111111111111111111111111")
+MFI_ACCOUNT = Pubkey.from_string("C9qzJQLMw2CK8nYMiHVUcKRXjgeG6zsZdUQpPBZh6G6o")
 
 
 def _derive_ata(owner: Pubkey, mint: Pubkey) -> Pubkey:
-    ATA_PROGRAM = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
     pda, _ = Pubkey.find_program_address(
         [bytes(owner), bytes(TOKEN_PROGRAM), bytes(mint)], ATA_PROGRAM
     )
     return pda
 
 
-def _pack_deposit_args(amount: int) -> bytes:
-    return DISC["deposit"] + struct.pack("<Q", amount) + b"\x00"
-
-
-def _pack_borrow_args(amount: int) -> bytes:
-    return DISC["borrow"] + struct.pack("<Q", amount)
-
-
-def _pack_repay_args(amount: int, repay_all: bool = False) -> bytes:
-    if repay_all:
-        return DISC["repay"] + struct.pack("<Q", amount) + b"\x01\x01"
-    return DISC["repay"] + struct.pack("<Q", amount) + b"\x00"
-
-
-def _pack_withdraw_args(amount: int, withdraw_all: bool = False) -> bytes:
-    if withdraw_all:
-        return DISC["withdraw"] + struct.pack("<Q", amount) + b"\x01\x01"
-    return DISC["withdraw"] + struct.pack("<Q", amount) + b"\x00"
+def _create_ata_ix(payer: Pubkey, owner: Pubkey, mint: Pubkey) -> Instruction:
+    ata = _derive_ata(owner, mint)
+    return Instruction(
+        program_id=ATA_PROGRAM,
+        accounts=[
+            AccountMeta(pubkey=payer, is_signer=True, is_writable=True),
+            AccountMeta(pubkey=ata, is_signer=False, is_writable=True),
+            AccountMeta(pubkey=owner, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=mint, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=SYSTEM_PROGRAM, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
+        ],
+        data=bytes(),
+    )
 
 
 class MarginFiLender:
@@ -81,7 +74,6 @@ class MarginFiLender:
         self.paper_mode = paper_mode
         self.rpc: AsyncClient | None = None
         self.keypair: Keypair | None = None
-        self.marginfi_account: Pubkey | None = None
         self.deposited_sol: float = 0.0
         self.borrowed_usdc: float = 0.0
 
@@ -94,289 +86,192 @@ class MarginFiLender:
         if self.rpc:
             await self.rpc.close()
 
-    async def _find_or_create_marginfi_account(self, wallet: Keypair) -> Pubkey:
-        if self.marginfi_account:
-            return self.marginfi_account
-
-        import httpx
-        disc = hashlib.sha256(b"account:MarginfiAccount").digest()[:8]
-        disc_b64 = base64.b64encode(disc).decode()
-        owner_b58 = str(wallet.pubkey())
-
-        async with httpx.AsyncClient(timeout=30) as http:
-            r = await http.post(HELIUS_RPC, json={
-                "jsonrpc": "2.0", "id": 1, "method": "getProgramAccounts",
-                "params": [str(MARGINFI_PROGRAM), {"encoding": "base64", "filters": [
-                    {"memcmp": {"offset": 0, "bytes": disc_b64, "encoding": "base64"}},
-                    {"memcmp": {"offset": 40, "bytes": owner_b58}},
-                ], "dataSlice": {"offset": 0, "length": 8}}]
-            })
-            accounts = r.json().get("result", [])
-
-        if accounts:
-            self.marginfi_account = Pubkey.from_string(accounts[0]["pubkey"])
-            log.info(f"Found existing MarginFi account: {self.marginfi_account}")
-            return self.marginfi_account
-
-        account_kp = Keypair()
-        self.marginfi_account = account_kp.pubkey()
-
-        ix_data = DISC["init_account"]
-        ix = Instruction(
+    def _accrue_ix(self, bank: Pubkey) -> Instruction:
+        return Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
-                AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
-                AccountMeta(pubkey=account_kp.pubkey(), is_signer=True, is_writable=True),
-                AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=True),
-                AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=True),
-                AccountMeta(pubkey=SYSTEM_PROGRAM, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=bank, is_signer=False, is_writable=True),
             ],
-            data=ix_data,
+            data=DISC["accrue"],
         )
 
-        blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
-        msg = MessageV0.try_compile(
-            payer=wallet.pubkey(),
-            instructions=[set_compute_unit_limit(200_000), set_compute_unit_price(50_000), ix],
-            address_lookup_table_accounts=[],
-            recent_blockhash=blockhash,
-        )
-        tx = VersionedTransaction(msg, [wallet, account_kp])
-        result = await self.rpc.send_transaction(tx)
-        sig = str(result.value)
-        log.info(f"Created MarginFi account: {self.marginfi_account} sig={sig}")
-        await self._confirm(sig)
-        return self.marginfi_account
+    def _health_remaining_accounts(self) -> list[AccountMeta]:
+        return [
+            AccountMeta(pubkey=SOL_BANK, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=SOL_ORACLE, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=USDC_BANK, is_signer=False, is_writable=False),
+            AccountMeta(pubkey=USDC_ORACLE, is_signer=False, is_writable=False),
+        ]
 
-    async def deposit_sol(self, wallet: Keypair, sol_amount: float) -> dict:
-        lamports = int(sol_amount * 1e9)
-
+    async def deposit_and_borrow(self, wallet: Keypair, sol_amount: float, usdc_borrow: float) -> dict:
         if self.paper_mode:
             self.deposited_sol += sol_amount
-            return {"status": "simulated", "deposited": sol_amount}
+            self.borrowed_usdc += usdc_borrow
+            return {"status": "simulated", "deposited": sol_amount, "borrowed": usdc_borrow}
 
-        account = await self._find_or_create_marginfi_account(wallet)
+        w = wallet.pubkey()
         sol_mint = Pubkey.from_string(SOL_MINT)
-        signer_ata = _derive_ata(wallet.pubkey(), sol_mint)
-        ATA_PROGRAM = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+        usdc_mint = Pubkey.from_string(USDC_MINT)
+        wsol_ata = _derive_ata(w, sol_mint)
+        usdc_ata = _derive_ata(w, usdc_mint)
+        lamports = int(sol_amount * 1e9)
+        usdc_atoms = int(usdc_borrow * 1e6)
+        vault_auth, _ = Pubkey.find_program_address([b"liquidity_vault_auth", bytes(USDC_BANK)], MARGINFI_PROGRAM)
 
-        bank_liquidity_vault = await self._get_bank_vault(SOL_BANK, BANK_LIQUIDITY_VAULT_OFFSET)
+        ixs = [
+            set_compute_unit_limit(800_000),
+            set_compute_unit_price(100_000),
+        ]
 
-        pre_ixs = []
-        ata_resp = await self.rpc.get_account_info(signer_ata)
+        ata_resp = await self.rpc.get_account_info(wsol_ata)
         if not ata_resp.value:
-            pre_ixs.append(Instruction(
-                program_id=ATA_PROGRAM,
-                accounts=[
-                    AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=True),
-                    AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
-                    AccountMeta(pubkey=wallet.pubkey(), is_signer=False, is_writable=False),
-                    AccountMeta(pubkey=sol_mint, is_signer=False, is_writable=False),
-                    AccountMeta(pubkey=SYSTEM_PROGRAM, is_signer=False, is_writable=False),
-                    AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
-                ],
-                data=bytes(),
-            ))
+            ixs.append(_create_ata_ix(w, w, sol_mint))
 
-        pre_ixs.append(Instruction(
+        ixs.append(Instruction(
             program_id=SYSTEM_PROGRAM,
             accounts=[
-                AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=True),
-                AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=w, is_signer=True, is_writable=True),
+                AccountMeta(pubkey=wsol_ata, is_signer=False, is_writable=True),
             ],
             data=struct.pack("<IQ", 2, lamports),
         ))
-        pre_ixs.append(Instruction(
+        ixs.append(Instruction(
             program_id=TOKEN_PROGRAM,
-            accounts=[AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True)],
+            accounts=[AccountMeta(pubkey=wsol_ata, is_signer=False, is_writable=True)],
             data=bytes([17]),
         ))
 
-        deposit_ix = Instruction(
+        ixs.append(Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
                 AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
-                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=False),
+                AccountMeta(pubkey=MFI_ACCOUNT, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=w, is_signer=True, is_writable=False),
                 AccountMeta(pubkey=SOL_BANK, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=bank_liquidity_vault, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=wsol_ata, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=SOL_VAULT, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
             ],
-            data=_pack_deposit_args(lamports),
-        )
+            data=DISC["deposit"] + struct.pack("<Q", lamports) + b"\x00",
+        ))
+
+        ixs.append(self._accrue_ix(SOL_BANK))
+        ixs.append(self._accrue_ix(USDC_BANK))
+
+        ixs.append(Instruction(
+            program_id=MARGINFI_PROGRAM,
+            accounts=[
+                AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=MFI_ACCOUNT, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=w, is_signer=True, is_writable=False),
+                AccountMeta(pubkey=USDC_BANK, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=usdc_ata, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=vault_auth, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=USDC_VAULT, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
+            ] + self._health_remaining_accounts(),
+            data=DISC["borrow"] + struct.pack("<Q", usdc_atoms),
+        ))
 
         blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
         msg = MessageV0.try_compile(
-            payer=wallet.pubkey(),
-            instructions=[set_compute_unit_limit(400_000), set_compute_unit_price(50_000)] + pre_ixs + [deposit_ix],
-            address_lookup_table_accounts=[],
-            recent_blockhash=blockhash,
+            payer=w, instructions=ixs,
+            address_lookup_table_accounts=[], recent_blockhash=blockhash,
         )
         tx = VersionedTransaction(msg, [wallet])
-        result = await self.rpc.send_transaction(tx)
-        sig = str(result.value)
-        log.info(f"Deposit SOL: {sol_amount} sig={sig}")
+        result = await self.rpc.send_raw_transaction(bytes(tx), opts=TxOpts(skip_preflight=True))
+        sig = str(result)
+        log.info(f"Deposit+borrow: deposit={sol_amount} SOL, borrow={usdc_borrow} USDC, tx={sig}")
         await self._confirm(sig)
         self.deposited_sol += sol_amount
-        return {"status": "confirmed", "deposited": sol_amount, "signature": sig}
+        self.borrowed_usdc += usdc_borrow
+        return {"status": "confirmed", "deposited": sol_amount, "borrowed": usdc_borrow, "signature": sig}
 
-    async def borrow_usdc(self, wallet: Keypair, usdc_amount: float) -> dict:
-        atoms = int(usdc_amount * 1e6)
-
+    async def repay_and_withdraw(self, wallet: Keypair) -> dict:
         if self.paper_mode:
-            self.borrowed_usdc += usdc_amount
-            return {"status": "simulated", "borrowed": usdc_amount}
+            result = {"deposited": self.deposited_sol, "borrowed": self.borrowed_usdc}
+            self.deposited_sol = 0
+            self.borrowed_usdc = 0
+            return {"status": "simulated", **result}
 
-        account = await self._find_or_create_marginfi_account(wallet)
+        w = wallet.pubkey()
+        sol_mint = Pubkey.from_string(SOL_MINT)
         usdc_mint = Pubkey.from_string(USDC_MINT)
-        signer_ata = _derive_ata(wallet.pubkey(), usdc_mint)
+        wsol_ata = _derive_ata(w, sol_mint)
+        usdc_ata = _derive_ata(w, usdc_mint)
+        sol_vault_auth, _ = Pubkey.find_program_address([b"liquidity_vault_auth", bytes(SOL_BANK)], MARGINFI_PROGRAM)
 
-        bank_liquidity_vault = await self._get_bank_vault(USDC_BANK, BANK_LIQUIDITY_VAULT_OFFSET)
-        bank_liquidity_vault_authority = await self._derive_bank_authority(USDC_BANK)
+        ixs = [
+            set_compute_unit_limit(800_000),
+            set_compute_unit_price(100_000),
+            self._accrue_ix(SOL_BANK),
+            self._accrue_ix(USDC_BANK),
+        ]
 
-        health_accounts = await self._build_health_check_accounts(account, extra_banks=[SOL_BANK, USDC_BANK])
-
-        ix = Instruction(
+        ixs.append(Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
                 AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
-                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=False),
+                AccountMeta(pubkey=MFI_ACCOUNT, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=w, is_signer=True, is_writable=False),
                 AccountMeta(pubkey=USDC_BANK, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=bank_liquidity_vault_authority, is_signer=False, is_writable=False),
-                AccountMeta(pubkey=bank_liquidity_vault, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
-            ] + health_accounts,
-            data=_pack_borrow_args(atoms),
-        )
-
-        blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
-        msg = MessageV0.try_compile(
-            payer=wallet.pubkey(),
-            instructions=[set_compute_unit_limit(300_000), set_compute_unit_price(50_000), ix],
-            address_lookup_table_accounts=[],
-            recent_blockhash=blockhash,
-        )
-        tx = VersionedTransaction(msg, [wallet])
-        result = await self.rpc.send_transaction(tx)
-        sig = str(result.value)
-        log.info(f"Borrow USDC: {usdc_amount} sig={sig}")
-        await self._confirm(sig)
-        self.borrowed_usdc += usdc_amount
-        return {"status": "confirmed", "borrowed": usdc_amount, "signature": sig}
-
-    async def repay_usdc(self, wallet: Keypair, usdc_amount: float) -> dict:
-        atoms = int(usdc_amount * 1e6)
-
-        if self.paper_mode:
-            self.borrowed_usdc = max(self.borrowed_usdc - usdc_amount, 0)
-            return {"status": "simulated", "repaid": usdc_amount}
-
-        account = await self._find_or_create_marginfi_account(wallet)
-        usdc_mint = Pubkey.from_string(USDC_MINT)
-        signer_ata = _derive_ata(wallet.pubkey(), usdc_mint)
-
-        bank_liquidity_vault = await self._get_bank_vault(USDC_BANK, BANK_LIQUIDITY_VAULT_OFFSET)
-
-        ix = Instruction(
-            program_id=MARGINFI_PROGRAM,
-            accounts=[
-                AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
-                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=False),
-                AccountMeta(pubkey=USDC_BANK, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
-                AccountMeta(pubkey=bank_liquidity_vault, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=usdc_ata, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=USDC_VAULT, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
             ],
-            data=_pack_repay_args(atoms),
-        )
+            data=DISC["repay"] + struct.pack("<Q", 2**63 - 1) + b"\x01\x01",
+        ))
+
+        ata_resp = await self.rpc.get_account_info(wsol_ata)
+        if not ata_resp.value:
+            ixs.append(_create_ata_ix(w, w, sol_mint))
+
+        ixs.append(Instruction(
+            program_id=MARGINFI_PROGRAM,
+            accounts=[
+                AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=MFI_ACCOUNT, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=w, is_signer=True, is_writable=False),
+                AccountMeta(pubkey=SOL_BANK, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=wsol_ata, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=sol_vault_auth, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=SOL_VAULT, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
+            ] + self._health_remaining_accounts(),
+            data=DISC["withdraw"] + struct.pack("<Q", 2**63 - 1) + b"\x01\x01",
+        ))
+
+        ixs.append(Instruction(
+            program_id=TOKEN_PROGRAM,
+            accounts=[
+                AccountMeta(pubkey=wsol_ata, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=w, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=w, is_signer=True, is_writable=False),
+            ],
+            data=bytes([9]),
+        ))
 
         blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
         msg = MessageV0.try_compile(
-            payer=wallet.pubkey(),
-            instructions=[set_compute_unit_limit(300_000), set_compute_unit_price(50_000), ix],
-            address_lookup_table_accounts=[],
-            recent_blockhash=blockhash,
+            payer=w, instructions=ixs,
+            address_lookup_table_accounts=[], recent_blockhash=blockhash,
         )
         tx = VersionedTransaction(msg, [wallet])
-        result = await self.rpc.send_transaction(tx)
-        sig = str(result.value)
-        log.info(f"Repay USDC: {usdc_amount} sig={sig}")
+        result = await self.rpc.send_raw_transaction(bytes(tx), opts=TxOpts(skip_preflight=True))
+        sig = str(result)
+        log.info(f"Repay+withdraw: tx={sig}")
         await self._confirm(sig)
-        self.borrowed_usdc = max(self.borrowed_usdc - usdc_amount, 0)
-        return {"status": "confirmed", "repaid": usdc_amount, "signature": sig}
-
-    async def _get_bank_vault(self, bank: Pubkey, offset: int) -> Pubkey:
-        resp = await self.rpc.get_account_info(bank)
-        if not resp.value:
-            raise ValueError(f"Bank not found: {bank}")
-        data = bytes(resp.value.data)
-        return Pubkey.from_bytes(data[offset:offset + 32])
-
-    async def _get_bank_oracle_keys(self, bank: Pubkey) -> list[Pubkey]:
-        resp = await self.rpc.get_account_info(bank)
-        if not resp.value:
-            raise ValueError(f"Bank not found: {bank}")
-        data = bytes(resp.value.data)
-        oracle_keys = []
-        for i in range(MAX_ORACLE_KEYS):
-            key_start = BANK_ORACLE_KEYS_OFFSET + (i * 32)
-            key = Pubkey.from_bytes(data[key_start:key_start + 32])
-            if key != ZERO_PUBKEY:
-                oracle_keys.append(key)
-        return oracle_keys
-
-    async def _build_health_check_accounts(self, marginfi_account: Pubkey, extra_banks: list[Pubkey] | None = None) -> list[AccountMeta]:
-        resp = await self.rpc.get_account_info(marginfi_account)
-        if not resp.value:
-            raise ValueError(f"MarginFi account not found: {marginfi_account}")
-        data = bytes(resp.value.data)
-
-        ordered_banks = []
-        for i in range(MAX_BALANCES):
-            offset = MARGINFI_ACCOUNT_BALANCES_OFFSET + (i * BALANCE_SIZE)
-            if offset + BALANCE_SIZE > len(data):
-                break
-            active = data[offset + BALANCE_ACTIVE_OFFSET]
-            if active:
-                bank_pk = Pubkey.from_bytes(
-                    data[offset + BALANCE_BANK_PK_OFFSET:
-                         offset + BALANCE_BANK_PK_OFFSET + 32]
-                )
-                ordered_banks.append(bank_pk)
-
-        if extra_banks:
-            existing = {str(b) for b in ordered_banks}
-            for b in extra_banks:
-                if str(b) not in existing:
-                    ordered_banks.append(b)
-
-        remaining = []
-        for bank_pk in ordered_banks:
-            remaining.append(AccountMeta(pubkey=bank_pk, is_signer=False, is_writable=False))
-            bank_resp = await self.rpc.get_account_info(bank_pk)
-            if bank_resp.value:
-                bdata = bytes(bank_resp.value.data)
-                oracle = Pubkey.from_bytes(bdata[BANK_ORACLE_KEYS_OFFSET:BANK_ORACLE_KEYS_OFFSET + 32])
-                remaining.append(AccountMeta(pubkey=oracle, is_signer=False, is_writable=False))
-
-        return remaining
-
-    async def _derive_bank_authority(self, bank: Pubkey) -> Pubkey:
-        pda, _ = Pubkey.find_program_address(
-            [b"liquidity_vault_auth", bytes(bank)],
-            MARGINFI_PROGRAM,
-        )
-        return pda
+        self.deposited_sol = 0
+        self.borrowed_usdc = 0
+        return {"status": "confirmed", "signature": sig}
 
     def get_max_borrow(self, collateral_sol: float, sol_price: float, ltv: float = 0.65) -> float:
         return collateral_sol * sol_price * ltv
 
     async def _confirm(self, signature: str, max_retries: int = 30):
-        sig = Signature.from_string(signature)
+        sig_str = signature.replace("SendTransactionResp(Signature(", "").replace("))", "")
+        sig = Signature.from_string(sig_str)
         for _ in range(max_retries):
             resp = await self.rpc.get_signature_statuses([sig])
             if resp.value and resp.value[0]:
