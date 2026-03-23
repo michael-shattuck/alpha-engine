@@ -55,6 +55,12 @@ class Orchestrator:
         await self.prices.update_sol_price()
         await self.prices.update_pool_apys()
 
+        if self.mode == "live":
+            market_data = self.prices.get_market_data()
+            for sid, strategy in self.strategies.items():
+                if hasattr(strategy, "recover_onchain_positions"):
+                    await strategy.recover_onchain_positions(market_data.get("sol_price", 0))
+
         for sid, strategy in self.strategies.items():
             if not strategy.active_positions and strategy.enabled and strategy.capital_allocated > 0:
                 market_data = self.prices.get_market_data()

@@ -40,6 +40,73 @@ class LeveragedLPStrategy(BaseStrategy):
             self.orca = OrcaExecutor(paper_mode=False)
             await self.orca.start()
 
+    async def recover_onchain_positions(self, sol_price: float):
+        if self.mode != "live":
+            return
+        await self.init_executors()
+        try:
+            import httpx
+            from solders.pubkey import Pubkey
+            WHIRLPOOL = Pubkey.from_string("whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc")
+            TOKEN_PROG = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            wallet = str(self.orca.keypair.pubkey())
+            async with httpx.AsyncClient(timeout=60) as http:
+                r = await http.post("https://johnath-nf0ci1-fast-mainnet.helius-rpc.com", json={
+                    "jsonrpc": "2.0", "id": 1, "method": "getTokenAccountsByOwner",
+                    "params": [wallet, {"programId": TOKEN_PROG}, {"encoding": "jsonParsed"}]
+                })
+                accounts = r.json().get("result", {}).get("value", [])
+                for acct in accounts:
+                    info = acct["account"]["data"]["parsed"]["info"]
+                    if int(info["tokenAmount"]["amount"]) == 1 and info["tokenAmount"]["decimals"] == 0:
+                        mint = info["mint"]
+                        pos_pda, _ = Pubkey.find_program_address(
+                            [b"position", bytes(Pubkey.from_string(mint))], WHIRLPOOL
+                        )
+                        r2 = await http.post("https://johnath-nf0ci1-fast-mainnet.helius-rpc.com", json={
+                            "jsonrpc": "2.0", "id": 1, "method": "getAccountInfo",
+                            "params": [str(pos_pda)]
+                        })
+                        if r2.json().get("result", {}).get("value"):
+                            already_tracked = any(
+                                p.metadata.get("position_mint") == mint
+                                for p in self.active_positions
+                            )
+                            if not already_tracked:
+                                import struct, base64, math
+                                r3 = await http.post("https://johnath-nf0ci1-fast-mainnet.helius-rpc.com", json={
+                                    "jsonrpc": "2.0", "id": 1, "method": "getAccountInfo",
+                                    "params": [str(pos_pda), {"encoding": "base64"}]
+                                })
+                                data = base64.b64decode(r3.json()["result"]["value"]["data"][0])
+                                tick_lower = struct.unpack_from("<i", data, 88)[0]
+                                tick_upper = struct.unpack_from("<i", data, 92)[0]
+                                lower_price = math.pow(1.0001, tick_lower) * 1000
+                                upper_price = math.pow(1.0001, tick_upper) * 1000
+                                rng = (upper_price - lower_price) / ((upper_price + lower_price) / 2)
+                                log.warning(f"RECOVERED on-chain position: {mint} range=${lower_price:.2f}-${upper_price:.2f}")
+                                position = StrategyPosition(
+                                    id=f"{self.STRATEGY_ID}_recovered_{int(time.time())}",
+                                    pool=ORCA_WHIRLPOOL_SOL_USDC,
+                                    entry_price=sol_price,
+                                    lower_price=lower_price,
+                                    upper_price=upper_price,
+                                    deposit_usd=self.capital_allocated,
+                                    current_value_usd=self.capital_allocated,
+                                    metadata={
+                                        "equity": self.capital_allocated,
+                                        "borrowed_usd": 0,
+                                        "leverage": 1.0,
+                                        "range_pct": rng / 2,
+                                        "position_mint": mint,
+                                        "recovered": True,
+                                    },
+                                )
+                                self.positions.append(position)
+                                self.status = "active"
+        except Exception as e:
+            log.error(f"Position recovery failed: {e}")
+
     def _actions_this_hour(self) -> int:
         cutoff = time.time() - 3600
         self._action_timestamps = [t for t in self._action_timestamps if t > cutoff]
@@ -70,14 +137,14 @@ class LeveragedLPStrategy(BaseStrategy):
             return self._force_range
         vol = self._volatility()
         if vol < 0.005:
-            return 0.02
-        if vol < 0.015:
-            return 0.03
-        if vol < 0.03:
             return 0.05
+        if vol < 0.015:
+            return 0.05
+        if vol < 0.03:
+            return 0.07
         if vol < 0.06:
-            return 0.08
-        return 0.12
+            return 0.10
+        return 0.15
 
     def _current_leverage(self) -> float:
         vol = self._volatility()
@@ -240,14 +307,14 @@ class LeveragedLPStrategy(BaseStrategy):
                     log.info(f"Live close for {act}: {result.get('signature')}")
                     self._record_action()
                     self._last_close_time = time.time()
+                    self.close_position(action["position_id"])
+                    log.info(f"Position closed for {act}. Will reopen after cooldown.")
+                    self.status = "idle"
                 except Exception as e:
-                    log.error(f"Live close for {act} failed: {e}")
-                    self.error = str(e)
+                    log.error(f"REBALANCE CLOSE FAILED - DISABLING STRATEGY: {e}")
+                    self.error = f"REBALANCE_FAILED: {str(e)[:100]}"
+                    self.enabled = False
                     self._last_error_time = time.time()
-                    return None
-            self.close_position(action["position_id"])
-            log.info(f"Position closed for {act}. Will reopen after cooldown.")
-            self.status = "idle"
             return None
 
         if act == "open":
@@ -362,24 +429,39 @@ class LeveragedLPStrategy(BaseStrategy):
             in_range = position.lower_price <= sol_price <= position.upper_price
             position.in_range = in_range
 
-            if in_range:
-                ratio = sol_price / position.entry_price if position.entry_price > 0 else 1
-                std_il = 2 * math.sqrt(ratio) / (1 + ratio) - 1
-                rw = (position.upper_price - position.lower_price) / position.entry_price if position.entry_price > 0 else 0.1
-                cf = min(2.0 / rw, 10.0) if rw > 0 else 1
-                position.current_value_usd = position.deposit_usd * (1 + std_il * cf)
+            sqrt_lower = math.sqrt(position.lower_price) if position.lower_price > 0 else 1
+            sqrt_upper = math.sqrt(position.upper_price) if position.upper_price > 0 else 1
+            sqrt_entry = math.sqrt(position.entry_price) if position.entry_price > 0 else 1
+            sqrt_current = math.sqrt(sol_price) if sol_price > 0 else 1
 
-                concentration = min(0.10 / rng, 8.0) if rng > 0 else 1
-                hourly_rate = pool_apy / 100 / 365 / 24 * concentration
-                position.fees_earned_usd += hourly_rate * hours_elapsed * position.deposit_usd
-                position.hours_in_range += hours_elapsed
-            elif sol_price < position.lower_price:
-                sol_at_exit = position.deposit_usd / position.lower_price if position.lower_price > 0 else 0
-                position.current_value_usd = sol_at_exit * sol_price
+            if position.entry_price > 0 and position.lower_price < position.entry_price < position.upper_price:
+                L_unit = position.deposit_usd / (
+                    (sqrt_entry - sqrt_lower) + sol_price * (1/sqrt_entry - 1/sqrt_upper)
+                ) if (sqrt_entry - sqrt_lower + sol_price * (1/sqrt_entry - 1/sqrt_upper)) > 0 else 0
+            else:
+                L_unit = position.deposit_usd / (2 * (sqrt_upper - sqrt_lower)) if sqrt_upper > sqrt_lower else 0
+
+            if sol_price <= position.lower_price:
+                sol_val = L_unit * (1/sqrt_lower - 1/sqrt_upper) * sol_price
+                usdc_val = 0
+                position.hours_out_of_range += hours_elapsed
+            elif sol_price >= position.upper_price:
+                sol_val = 0
+                usdc_val = L_unit * (sqrt_upper - sqrt_lower)
                 position.hours_out_of_range += hours_elapsed
             else:
-                position.current_value_usd = position.deposit_usd
-                position.hours_out_of_range += hours_elapsed
+                sol_val = L_unit * (1/sqrt_current - 1/sqrt_upper) * sol_price
+                usdc_val = L_unit * (sqrt_current - sqrt_lower)
+                position.hours_in_range += hours_elapsed
+
+            position.current_value_usd = sol_val + usdc_val
+            position.sol_amount = sol_val / sol_price if sol_price > 0 else 0
+            position.usdc_amount = usdc_val
+
+            if in_range:
+                concentration = min(0.10 / rng, 4.0) if rng > 0 else 1
+                hourly_rate = pool_apy / 100 / 365 / 24 * concentration
+                position.fees_earned_usd += hourly_rate * hours_elapsed * position.deposit_usd
 
             borrowed = position.metadata.get("borrowed_usd", 0)
             if borrowed > 0:
