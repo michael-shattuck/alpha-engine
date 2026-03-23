@@ -20,11 +20,11 @@ class LeveragedLPStrategy(BaseStrategy):
     TX_COST_USD = 0.15
     MIN_COMPOUND_USD = 0.50
 
-    MAX_ACTIONS_PER_HOUR = 3
-    COOLDOWN_AFTER_CLOSE_SEC = 300
+    MAX_ACTIONS_PER_HOUR = 5
+    COOLDOWN_AFTER_CLOSE_SEC = 120
     COOLDOWN_AFTER_ERROR_SEC = 600
 
-    def __init__(self, mode: str = "paper", base_leverage: float = 3.0, base_range: float = 0.05):
+    def __init__(self, mode: str = "paper", base_leverage: float = 4.0, base_range: float = 0.03):
         super().__init__(mode=mode)
         self.base_leverage = base_leverage
         self.base_range = base_range
@@ -142,11 +142,11 @@ class LeveragedLPStrategy(BaseStrategy):
             return self._force_range
         vol = self._volatility()
         if vol < 0.005:
-            return 0.05
+            return 0.03
         if vol < 0.015:
-            return 0.05
+            return 0.04
         if vol < 0.03:
-            return 0.07
+            return 0.06
         if vol < 0.06:
             return 0.10
         return 0.15
@@ -156,7 +156,7 @@ class LeveragedLPStrategy(BaseStrategy):
         if vol > 0.04:
             return min(self.base_leverage, 1.5)
         if vol > 0.02:
-            return min(self.base_leverage, 2.0)
+            return min(self.base_leverage, 2.5)
         return self.base_leverage
 
     async def evaluate(self, market_data: dict) -> dict:
@@ -316,12 +316,38 @@ class LeveragedLPStrategy(BaseStrategy):
                     self._last_close_time = time.time()
                     if old.metadata.get("borrowed_usd", 0) > 0 and self.lender:
                         await self._repay_leverage(sol_price)
+                    borrowed = old.metadata.get("borrowed_usd", 0)
+                    net = old.current_value_usd + old.fees_earned_usd - borrowed
+                    self.capital_allocated = max(net, self.capital_allocated)
                     self.close_position(action["position_id"])
-                    log.info(f"Position closed for {act}. Will reopen after cooldown.")
+                    log.info(f"Position closed for {act}. Capital=${self.capital_allocated:.2f}. Will reopen after cooldown.")
                     self.status = "idle"
                 except Exception as e:
                     log.error(f"REBALANCE CLOSE FAILED - DISABLING STRATEGY: {e}")
                     self.error = f"REBALANCE_FAILED: {str(e)[:100]}"
+                    self.enabled = False
+                    self._last_error_time = time.time()
+            return None
+
+        if act == "compound":
+            old = next((p for p in self.active_positions if p.id == action["position_id"]), None)
+            if old and old.metadata.get("position_mint"):
+                try:
+                    result = await self.orca.close_position(self.orca.keypair, old.metadata["position_mint"])
+                    log.info(f"Live close for compound: {result.get('signature')}")
+                    self._record_action()
+                    self._last_close_time = time.time()
+                    if old.metadata.get("borrowed_usd", 0) > 0 and self.lender:
+                        await self._repay_leverage(sol_price)
+                    borrowed = old.metadata.get("borrowed_usd", 0)
+                    net = old.current_value_usd + old.fees_earned_usd - borrowed
+                    self.capital_allocated = max(net, self.capital_allocated)
+                    log.info(f"Compound: capital updated ${self.capital_allocated:.2f} (was ${old.metadata.get('equity', 0):.2f})")
+                    self.close_position(action["position_id"])
+                    self.status = "idle"
+                except Exception as e:
+                    log.error(f"COMPOUND CLOSE FAILED - DISABLING STRATEGY: {e}")
+                    self.error = f"COMPOUND_FAILED: {str(e)[:100]}"
                     self.enabled = False
                     self._last_error_time = time.time()
             return None
@@ -555,7 +581,7 @@ class LeveragedLPStrategy(BaseStrategy):
             position.usdc_amount = usdc_val
 
             if in_range:
-                concentration = min(0.10 / rng, 4.0) if rng > 0 else 1
+                concentration = min(0.10 / rng, 6.0) if rng > 0 else 1
                 hourly_rate = pool_apy / 100 / 365 / 24 * concentration
                 position.fees_earned_usd += hourly_rate * hours_elapsed * position.deposit_usd
 
