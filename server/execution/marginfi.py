@@ -335,33 +335,35 @@ class MarginFiLender:
             raise ValueError(f"MarginFi account not found: {marginfi_account}")
         data = bytes(resp.value.data)
 
-        active_banks = set()
+        ordered_banks = []
         for i in range(MAX_BALANCES):
-            balance_start = MARGINFI_ACCOUNT_BALANCES_OFFSET + (i * BALANCE_SIZE)
-            active = data[balance_start + BALANCE_ACTIVE_OFFSET]
+            offset = MARGINFI_ACCOUNT_BALANCES_OFFSET + (i * BALANCE_SIZE)
+            if offset + BALANCE_SIZE > len(data):
+                break
+            active = data[offset + BALANCE_ACTIVE_OFFSET]
             if active:
                 bank_pk = Pubkey.from_bytes(
-                    data[balance_start + BALANCE_BANK_PK_OFFSET:
-                         balance_start + BALANCE_BANK_PK_OFFSET + 32]
+                    data[offset + BALANCE_BANK_PK_OFFSET:
+                         offset + BALANCE_BANK_PK_OFFSET + 32]
                 )
-                active_banks.add(bank_pk)
+                ordered_banks.append(bank_pk)
 
         if extra_banks:
+            existing = {str(b) for b in ordered_banks}
             for b in extra_banks:
-                active_banks.add(b)
+                if str(b) not in existing:
+                    ordered_banks.append(b)
 
-        remaining_accounts = []
-        for bank_pk in active_banks:
-            remaining_accounts.append(
-                AccountMeta(pubkey=bank_pk, is_signer=False, is_writable=False)
-            )
-            oracle_keys = await self._get_bank_oracle_keys(bank_pk)
-            for oracle_key in oracle_keys:
-                remaining_accounts.append(
-                    AccountMeta(pubkey=oracle_key, is_signer=False, is_writable=False)
-                )
+        remaining = []
+        for bank_pk in ordered_banks:
+            remaining.append(AccountMeta(pubkey=bank_pk, is_signer=False, is_writable=False))
+            bank_resp = await self.rpc.get_account_info(bank_pk)
+            if bank_resp.value:
+                bdata = bytes(bank_resp.value.data)
+                oracle = Pubkey.from_bytes(bdata[BANK_ORACLE_KEYS_OFFSET:BANK_ORACLE_KEYS_OFFSET + 32])
+                remaining.append(AccountMeta(pubkey=oracle, is_signer=False, is_writable=False))
 
-        return remaining_accounts
+        return remaining
 
     async def _derive_bank_authority(self, bank: Pubkey) -> Pubkey:
         pda, _ = Pubkey.find_program_address(
