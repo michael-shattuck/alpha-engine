@@ -242,60 +242,51 @@ class OrcaExecutor:
         lower_price: float,
         upper_price: float,
     ) -> tuple[float, float, int]:
-        sqrt_p = math.sqrt(current_price)
-        sqrt_l = math.sqrt(lower_price)
-        sqrt_u = math.sqrt(upper_price)
+        return self.calculate_liquidity_from_tokens(
+            amount_usd / 2 / current_price,
+            amount_usd / 2,
+            current_price, lower_price, upper_price,
+        )
+
+    def calculate_liquidity_from_tokens(
+        self,
+        sol_available: float,
+        usdc_available: float,
+        current_price: float,
+        lower_price: float,
+        upper_price: float,
+    ) -> tuple[float, float, int]:
+        sqrt_pc = self._tick_to_sqrt_price_x64(self.price_to_tick(current_price))
+        sqrt_pa = self._tick_to_sqrt_price_x64(self.price_to_tick(lower_price))
+        sqrt_pb = self._tick_to_sqrt_price_x64(self.price_to_tick(upper_price))
+
+        sol_lamports = int(sol_available * 1e9)
+        usdc_atoms = int(usdc_available * 1e6)
 
         if current_price <= lower_price:
-            sol_amount = amount_usd / current_price
-            usdc_amount = 0.0
-            liquidity = int(
-                sol_amount
-                * 1e9
-                * self._tick_to_sqrt_price_x64(self.price_to_tick(upper_price))
-                * self._tick_to_sqrt_price_x64(self.price_to_tick(lower_price))
-                / (
-                    (
-                        self._tick_to_sqrt_price_x64(self.price_to_tick(upper_price))
-                        - self._tick_to_sqrt_price_x64(self.price_to_tick(lower_price))
-                    )
-                    * (2**64)
-                )
-            )
-        elif current_price >= upper_price:
-            sol_amount = 0.0
-            usdc_amount = amount_usd
-            liquidity = int(
-                usdc_amount
-                * 1e6
-                * (2**64)
-                / (
-                    self._tick_to_sqrt_price_x64(self.price_to_tick(upper_price))
-                    - self._tick_to_sqrt_price_x64(self.price_to_tick(lower_price))
-                )
-            )
-        else:
-            ratio_sol = (sqrt_u - sqrt_p) / (sqrt_p * (sqrt_u - sqrt_l) / sqrt_l + (sqrt_u - sqrt_p))
-            sol_value_usd = amount_usd * ratio_sol
-            usdc_value_usd = amount_usd * (1 - ratio_sol)
+            if sol_lamports <= 0:
+                return 0.0, 0.0, 0
+            liquidity = sol_lamports * sqrt_pb * sqrt_pa // ((sqrt_pb - sqrt_pa) * (2**64))
+            return sol_available, 0.0, max(liquidity, 0)
 
-            sol_amount = sol_value_usd / current_price
-            usdc_amount = usdc_value_usd
+        if current_price >= upper_price:
+            if usdc_atoms <= 0:
+                return 0.0, 0.0, 0
+            liquidity = usdc_atoms * (2**64) // (sqrt_pb - sqrt_pa)
+            return 0.0, usdc_available, max(liquidity, 0)
 
-            sol_lamports = int(sol_amount * 1e9)
-            usdc_atoms = int(usdc_amount * 1e6)
+        if sqrt_pc <= sqrt_pa or sqrt_pc >= sqrt_pb:
+            return sol_available, usdc_available, 0
 
-            sqrt_price_current = self._tick_to_sqrt_price_x64(self.price_to_tick(current_price))
-            sqrt_price_lower = self._tick_to_sqrt_price_x64(self.price_to_tick(lower_price))
-            sqrt_price_upper = self._tick_to_sqrt_price_x64(self.price_to_tick(upper_price))
+        liq_from_sol = sol_lamports * sqrt_pc * sqrt_pb // ((sqrt_pb - sqrt_pc) * (2**64))
+        liq_from_usdc = usdc_atoms * (2**64) // (sqrt_pc - sqrt_pa)
 
-            liq_a = (
-                sol_lamports * sqrt_price_current * sqrt_price_lower
-            ) // ((sqrt_price_current - sqrt_price_lower) * (2**64))
-            liq_b = (usdc_atoms * (2**64)) // (sqrt_price_upper - sqrt_price_current)
-            liquidity = min(liq_a, liq_b)
+        liquidity = min(liq_from_sol, liq_from_usdc)
 
-        return sol_amount, usdc_amount, liquidity
+        actual_sol_lamports = liquidity * (sqrt_pb - sqrt_pc) * (2**64) // (sqrt_pc * sqrt_pb)
+        actual_usdc_atoms = liquidity * (sqrt_pc - sqrt_pa) // (2**64)
+
+        return actual_sol_lamports / 1e9, actual_usdc_atoms / 1e6, max(liquidity, 0)
 
     async def open_position(
         self,
@@ -831,16 +822,11 @@ class OrcaExecutor:
         offset += 32
         _position_mint = Pubkey.from_bytes(data[offset : offset + 32])
         offset += 32
-        liquidity = struct.unpack_from("<Q", data, offset)[0]
-        offset += 16
-        tick_lower = struct.unpack_from("<i", data, offset)[0]
-        offset += 4
-        tick_upper = struct.unpack_from("<i", data, offset)[0]
-        offset += 4
-        offset += 16 + 16
-        fee_owed_a = struct.unpack_from("<Q", data, offset)[0]
-        offset += 8
-        fee_owed_b = struct.unpack_from("<Q", data, offset)[0]
+        liquidity = struct.unpack_from("<Q", data, 72)[0]
+        tick_lower = struct.unpack_from("<i", data, 88)[0]
+        tick_upper = struct.unpack_from("<i", data, 92)[0]
+        fee_owed_a = struct.unpack_from("<Q", data, 112)[0]
+        fee_owed_b = struct.unpack_from("<Q", data, 136)[0]
 
         return {
             "whirlpool": str(whirlpool),

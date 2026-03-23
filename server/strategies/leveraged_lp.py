@@ -364,15 +364,16 @@ class LeveragedLPStrategy(BaseStrategy):
 
             lower_tick = self.orca.price_to_tick(lower_price)
             upper_tick = self.orca.price_to_tick(upper_price)
-            _, _, liquidity = self.orca.calculate_liquidity(
-                deposit_usd, current_price, lower_price, upper_price
+            actual_sol, actual_usdc, liquidity = self.orca.calculate_liquidity_from_tokens(
+                sol_for_lp, usdc_amount, current_price, lower_price, upper_price,
             )
+            log.info(f"Liquidity calc: sol={actual_sol:.6f} usdc={actual_usdc:.2f} liq={liquidity}")
 
             try:
                 result = await self.orca.open_position(
                     self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
                     lower_tick, upper_tick, liquidity,
-                    sol_for_lp, usdc_amount,
+                    actual_sol, actual_usdc,
                 )
                 log.info(f"Live open: {result.get('signature')} mint={result.get('position_mint')}")
             except Exception as e:
