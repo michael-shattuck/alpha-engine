@@ -22,7 +22,7 @@ log = logging.getLogger("marginfi")
 
 MARGINFI_PROGRAM = Pubkey.from_string("MFv2hWf31Z9kbCa1snEPYctwafyhdvnV7FZnsebVacA")
 MARGINFI_GROUP = Pubkey.from_string("4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8")
-SOL_BANK = Pubkey.from_string("4uawSqEM2jDPKkQRtnoSTmBjFJ51Ehu79EvGfu3R45o7")
+SOL_BANK = Pubkey.from_string("CCKtUs6Cgwo4aaQUmBPmyoApH2gUDErxNZCAntD6LYGh")
 USDC_BANK = Pubkey.from_string("2s37akK2eyBbp8DZgCm7RtsaEz8eJP3Nxd4urLHQv7yB")
 TOKEN_PROGRAM = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
 
