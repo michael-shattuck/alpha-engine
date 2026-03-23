@@ -119,16 +119,16 @@ class MarginFiLender:
         usdc_atoms = int(usdc_borrow * 1e6)
         vault_auth, _ = Pubkey.find_program_address([b"liquidity_vault_auth", bytes(USDC_BANK)], MARGINFI_PROGRAM)
 
-        ixs = [
-            set_compute_unit_limit(800_000),
-            set_compute_unit_price(100_000),
-        ]
+        # TX 1: Accrue + Deposit
+        deposit_ixs = [set_compute_unit_limit(600_000), set_compute_unit_price(100_000)]
+        deposit_ixs.append(self._accrue_ix(SOL_BANK))
+        deposit_ixs.append(self._accrue_ix(USDC_BANK))
 
         ata_resp = await self.rpc.get_account_info(wsol_ata)
         if not ata_resp.value:
-            ixs.append(_create_ata_ix(w, w, sol_mint))
+            deposit_ixs.append(_create_ata_ix(w, w, sol_mint))
 
-        ixs.append(Instruction(
+        deposit_ixs.append(Instruction(
             program_id=SYSTEM_PROGRAM,
             accounts=[
                 AccountMeta(pubkey=w, is_signer=True, is_writable=True),
@@ -136,13 +136,12 @@ class MarginFiLender:
             ],
             data=struct.pack("<IQ", 2, lamports),
         ))
-        ixs.append(Instruction(
+        deposit_ixs.append(Instruction(
             program_id=TOKEN_PROGRAM,
             accounts=[AccountMeta(pubkey=wsol_ata, is_signer=False, is_writable=True)],
             data=bytes([17]),
         ))
-
-        ixs.append(Instruction(
+        deposit_ixs.append(Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
                 AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
@@ -156,10 +155,19 @@ class MarginFiLender:
             data=DISC["deposit"] + struct.pack("<Q", lamports) + b"\x00",
         ))
 
-        ixs.append(self._accrue_ix(SOL_BANK))
-        ixs.append(self._accrue_ix(USDC_BANK))
+        bh = (await self.rpc.get_latest_blockhash()).value.blockhash
+        msg1 = MessageV0.try_compile(payer=w, instructions=deposit_ixs, address_lookup_table_accounts=[], recent_blockhash=bh)
+        tx1 = VersionedTransaction(msg1, [wallet])
+        r1 = await self.rpc.send_raw_transaction(bytes(tx1), opts=TxOpts(skip_preflight=True))
+        log.info(f"Deposit tx: {r1}")
+        await self._confirm(str(r1))
+        self.deposited_sol += sol_amount
 
-        ixs.append(Instruction(
+        await asyncio.sleep(2)
+
+        # TX 2: Borrow (oracles now fresh from accrue in TX 1)
+        borrow_ixs = [set_compute_unit_limit(400_000), set_compute_unit_price(100_000)]
+        borrow_ixs.append(Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
                 AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=True),
@@ -174,19 +182,15 @@ class MarginFiLender:
             data=DISC["borrow"] + struct.pack("<Q", usdc_atoms),
         ))
 
-        blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
-        msg = MessageV0.try_compile(
-            payer=w, instructions=ixs,
-            address_lookup_table_accounts=[], recent_blockhash=blockhash,
-        )
-        tx = VersionedTransaction(msg, [wallet])
-        result = await self.rpc.send_raw_transaction(bytes(tx), opts=TxOpts(skip_preflight=True))
-        sig = str(result)
-        log.info(f"Deposit+borrow: deposit={sol_amount} SOL, borrow={usdc_borrow} USDC, tx={sig}")
-        await self._confirm(sig)
-        self.deposited_sol += sol_amount
+        bh2 = (await self.rpc.get_latest_blockhash()).value.blockhash
+        msg2 = MessageV0.try_compile(payer=w, instructions=borrow_ixs, address_lookup_table_accounts=[], recent_blockhash=bh2)
+        tx2 = VersionedTransaction(msg2, [wallet])
+        r2 = await self.rpc.send_raw_transaction(bytes(tx2), opts=TxOpts(skip_preflight=True))
+        log.info(f"Borrow tx: {r2}")
+        await self._confirm(str(r2))
         self.borrowed_usdc += usdc_borrow
-        return {"status": "confirmed", "deposited": sol_amount, "borrowed": usdc_borrow, "signature": sig}
+
+        return {"status": "confirmed", "deposited": sol_amount, "borrowed": usdc_borrow}
 
     async def repay_and_withdraw(self, wallet: Keypair) -> dict:
         if self.paper_mode:

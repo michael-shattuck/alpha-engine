@@ -6,6 +6,7 @@ from typing import Optional
 from server.strategies.base import BaseStrategy, StrategyPosition
 from server.config import ORCA_WHIRLPOOL_SOL_USDC, SOL_MINT, USDC_MINT
 from server.execution.orca import OrcaExecutor
+from server.execution.marginfi import MarginFiLender
 
 log = logging.getLogger("leveraged_lp")
 
@@ -29,6 +30,7 @@ class LeveragedLPStrategy(BaseStrategy):
         self.base_range = base_range
         self._price_buffer: list[float] = []
         self.orca: OrcaExecutor | None = None
+        self.lender: MarginFiLender | None = None
         self._force_range: float | None = None
         self._action_timestamps: list[float] = []
         self._last_close_time: float = 0
@@ -39,6 +41,9 @@ class LeveragedLPStrategy(BaseStrategy):
         if self.mode == "live" and not self.orca:
             self.orca = OrcaExecutor(paper_mode=False)
             await self.orca.start()
+        if self.mode == "live" and not self.lender:
+            self.lender = MarginFiLender(paper_mode=False)
+            await self.lender.start()
 
     async def recover_onchain_positions(self, sol_price: float):
         if self.mode != "live":
@@ -295,6 +300,8 @@ class LeveragedLPStrategy(BaseStrategy):
                     log.error(f"Live close failed: {e}")
                     self.error = str(e)
                     self._last_error_time = time.time()
+                if pos.metadata.get("borrowed_usd", 0) > 0 and self.lender:
+                    await self._repay_leverage(sol_price)
             self.close_position(action["position_id"])
             self.status = "idle"
             return None
@@ -307,6 +314,8 @@ class LeveragedLPStrategy(BaseStrategy):
                     log.info(f"Live close for {act}: {result.get('signature')}")
                     self._record_action()
                     self._last_close_time = time.time()
+                    if old.metadata.get("borrowed_usd", 0) > 0 and self.lender:
+                        await self._repay_leverage(sol_price)
                     self.close_position(action["position_id"])
                     log.info(f"Position closed for {act}. Will reopen after cooldown.")
                     self.status = "idle"
@@ -324,6 +333,7 @@ class LeveragedLPStrategy(BaseStrategy):
                 return None
 
             rng = self._optimal_range()
+            lev = self._current_leverage()
             lower_price = sol_price * (1 - rng)
             upper_price = sol_price * (1 + rng)
 
@@ -337,35 +347,96 @@ class LeveragedLPStrategy(BaseStrategy):
             target_usd = self.capital_allocated
             max_sol = target_usd / sol_price
             available_sol = max(sol_balance - reserve_sol, 0)
-            deposit_sol = min(max_sol, available_sol)
-            if deposit_sol * sol_price > target_usd * 1.05:
-                deposit_sol = max_sol
+            equity_sol = min(max_sol, available_sol)
 
-            if deposit_sol < 0.05:
+            if equity_sol < 0.02:
                 log.error(f"Insufficient SOL: {sol_balance:.4f} available")
                 self.error = "insufficient_balance"
                 self._last_error_time = time.time()
                 return None
 
-            deposit_usd = deposit_sol * sol_price
-            sol_for_lp = deposit_sol / 2
-            sol_to_swap = deposit_sol / 2
+            equity_usd = equity_sol * sol_price
+            borrowed_usdc = 0.0
 
-            log.info(f"Live open: {deposit_sol:.4f} SOL (${deposit_usd:.2f})")
+            if lev > 1.0 and self.lender:
+                collateral_sol = equity_sol
+                max_borrow = self.lender.get_max_borrow(collateral_sol, sol_price, ltv=0.65)
+                desired_borrow = equity_usd * (lev - 1)
+                borrow_usdc = min(desired_borrow, max_borrow * 0.9)
 
-            try:
-                swap_lamports = int(sol_to_swap * 1e9)
-                swap_result = await self.orca.swap(
-                    self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
-                    swap_lamports, a_to_b=True,
-                )
-                log.info(f"Live swap: {swap_result.get('signature')}")
-                usdc_amount = sol_to_swap * sol_price
-            except Exception as e:
-                log.error(f"Live swap failed: {e}")
-                self.error = str(e)
-                self._last_error_time = time.time()
-                return None
+                if borrow_usdc < 0.50:
+                    log.warning(f"Borrow too small (${borrow_usdc:.2f}), proceeding at 1x")
+                    lev = 1.0
+                else:
+                    log.info(f"Leverage: depositing {collateral_sol:.4f} SOL, borrowing ${borrow_usdc:.2f} USDC")
+                    try:
+                        mfi_result = await self.lender.deposit_and_borrow(
+                            self.orca.keypair, collateral_sol, borrow_usdc,
+                        )
+                        log.info(f"MarginFi: {mfi_result}")
+                        borrowed_usdc = borrow_usdc
+                        equity_sol = 0
+                    except Exception as e:
+                        log.error(f"MarginFi deposit+borrow failed, falling back to 1x: {e}")
+                        lev = 1.0
+
+            total_usd = equity_usd + borrowed_usdc
+
+            if lev > 1.0 and borrowed_usdc > 0:
+                sol_for_lp = 0
+                sol_to_swap = 0
+                usdc_from_borrow = borrowed_usdc
+
+                swap_sol = equity_sol
+                if swap_sol > 0.005:
+                    try:
+                        swap_lamports = int(swap_sol * 1e9)
+                        swap_result = await self.orca.swap(
+                            self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
+                            swap_lamports, a_to_b=True,
+                        )
+                        log.info(f"Swap remaining SOL to USDC: {swap_result.get('signature')}")
+                        usdc_from_borrow += swap_sol * sol_price
+                    except Exception as e:
+                        log.error(f"SOL->USDC swap failed: {e}")
+
+                usdc_for_sol_side = usdc_from_borrow / 2
+                usdc_for_usdc_side = usdc_from_borrow / 2
+
+                try:
+                    swap_atoms = int(usdc_for_sol_side * 1e6)
+                    swap_result = await self.orca.swap(
+                        self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
+                        swap_atoms, a_to_b=False,
+                    )
+                    log.info(f"USDC->SOL swap: {swap_result.get('signature')}")
+                    sol_for_lp = usdc_for_sol_side / sol_price
+                except Exception as e:
+                    log.error(f"USDC->SOL swap failed: {e}")
+                    self.error = str(e)
+                    self._last_error_time = time.time()
+                    return None
+
+                usdc_amount = usdc_for_usdc_side
+            else:
+                sol_for_lp = equity_sol / 2
+                sol_to_swap = equity_sol / 2
+
+                log.info(f"Live open 1x: {equity_sol:.4f} SOL (${equity_usd:.2f})")
+
+                try:
+                    swap_lamports = int(sol_to_swap * 1e9)
+                    swap_result = await self.orca.swap(
+                        self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
+                        swap_lamports, a_to_b=True,
+                    )
+                    log.info(f"Live swap: {swap_result.get('signature')}")
+                    usdc_amount = sol_to_swap * sol_price
+                except Exception as e:
+                    log.error(f"Live swap failed: {e}")
+                    self.error = str(e)
+                    self._last_error_time = time.time()
+                    return None
 
             lower_tick = self.orca.price_to_tick(lower_price)
             upper_tick = self.orca.price_to_tick(upper_price)
@@ -382,7 +453,7 @@ class LeveragedLPStrategy(BaseStrategy):
                 )
                 log.info(f"Live open: {result.get('signature')} mint={result.get('position_mint')}")
             except Exception as e:
-                log.error(f"Live LP open failed (swap already done): {e}")
+                log.error(f"Live LP open failed (swaps already done): {e}")
                 self.error = f"LP_OPEN_FAILED_AFTER_SWAP: {e}"
                 self._last_error_time = time.time()
                 self._last_close_time = time.time()
@@ -397,14 +468,14 @@ class LeveragedLPStrategy(BaseStrategy):
                 entry_price=sol_price,
                 lower_price=result.get("lower_price", lower_price),
                 upper_price=result.get("upper_price", upper_price),
-                deposit_usd=deposit_usd,
-                current_value_usd=deposit_usd,
-                sol_amount=sol_for_lp,
-                usdc_amount=usdc_amount,
+                deposit_usd=total_usd,
+                current_value_usd=total_usd,
+                sol_amount=actual_sol,
+                usdc_amount=actual_usdc,
                 metadata={
-                    "equity": deposit_usd,
-                    "borrowed_usd": 0,
-                    "leverage": 1.0,
+                    "equity": equity_usd,
+                    "borrowed_usd": borrowed_usdc,
+                    "leverage": lev if borrowed_usdc > 0 else 1.0,
                     "range_pct": rng,
                     "position_mint": result.get("position_mint"),
                     "open_signature": result.get("signature"),
@@ -416,6 +487,25 @@ class LeveragedLPStrategy(BaseStrategy):
             return position
 
         return None
+
+    async def _repay_leverage(self, sol_price: float):
+        if not self.lender or self.lender.borrowed_usdc <= 0:
+            return
+        try:
+            usdc_owed = self.lender.borrowed_usdc
+            swap_sol = (usdc_owed * 1.02) / sol_price
+            swap_lamports = int(swap_sol * 1e9)
+            swap_result = await self.orca.swap(
+                self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
+                swap_lamports, a_to_b=True,
+            )
+            log.info(f"Swapped SOL->USDC for repay: {swap_result.get('signature')}")
+
+            result = await self.lender.repay_and_withdraw(self.orca.keypair)
+            log.info(f"MarginFi repay+withdraw: {result}")
+        except Exception as e:
+            log.error(f"MarginFi repay failed: {e}")
+            self.error = f"REPAY_FAILED: {str(e)[:100]}"
 
     async def update(self, market_data: dict):
         sol_price = market_data.get("sol_price", 0)
