@@ -235,7 +235,7 @@ class MarginFiLender:
         bank_liquidity_vault = await self._get_bank_vault(USDC_BANK, BANK_LIQUIDITY_VAULT_OFFSET)
         bank_liquidity_vault_authority = await self._derive_bank_authority(USDC_BANK)
 
-        health_accounts = await self._build_health_check_accounts(account)
+        health_accounts = await self._build_health_check_accounts(account, extra_banks=[SOL_BANK, USDC_BANK])
 
         ix = Instruction(
             program_id=MARGINFI_PROGRAM,
@@ -329,7 +329,7 @@ class MarginFiLender:
                 oracle_keys.append(key)
         return oracle_keys
 
-    async def _build_health_check_accounts(self, marginfi_account: Pubkey) -> list[AccountMeta]:
+    async def _build_health_check_accounts(self, marginfi_account: Pubkey, extra_banks: list[Pubkey] | None = None) -> list[AccountMeta]:
         resp = await self.rpc.get_account_info(marginfi_account)
         if not resp.value:
             raise ValueError(f"MarginFi account not found: {marginfi_account}")
@@ -345,6 +345,10 @@ class MarginFiLender:
                          balance_start + BALANCE_BANK_PK_OFFSET + 32]
                 )
                 active_banks.add(bank_pk)
+
+        if extra_banks:
+            for b in extra_banks:
+                active_banks.add(b)
 
         remaining_accounts = []
         for bank_pk in active_banks:
