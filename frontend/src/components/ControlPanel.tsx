@@ -24,7 +24,7 @@ export default function ControlPanel({ status, onRefresh }: Props) {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    const lev = Object.values(status.strategies).find(s => s.metrics?.leverage)?.metrics?.leverage
+    const lev = Object.values(status.strategies).find(s => s.metrics?.target_leverage)?.metrics?.target_leverage
     if (typeof lev === 'number' && lev > 0) setLeverage(Math.round(lev * 10) / 10)
   }, [status])
 
