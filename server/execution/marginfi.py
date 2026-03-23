@@ -29,12 +29,23 @@ TOKEN_PROGRAM = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 HELIUS_RPC = "https://johnath-nf0ci1-fast-mainnet.helius-rpc.com"
 
 DISC = {
-    "init_account": bytes([0x2B, 0x4E, 0x3D, 0xFF, 0x94, 0x34, 0xF9, 0x9A]),
-    "deposit": bytes([0xAB, 0x5E, 0xEB, 0x67, 0x52, 0x40, 0xD4, 0x8C]),
-    "borrow": bytes([0x04, 0x7E, 0x74, 0x35, 0x30, 0x05, 0xD4, 0x1F]),
-    "repay": bytes([0x4F, 0xD1, 0xAC, 0xB1, 0xDE, 0x33, 0xAD, 0x97]),
-    "withdraw": bytes([0x24, 0x48, 0x4A, 0x13, 0xD2, 0xD2, 0xC0, 0xC0]),
+    "init_account": hashlib.sha256(b"global:marginfi_account_initialize").digest()[:8],
+    "deposit": hashlib.sha256(b"global:lending_account_deposit").digest()[:8],
+    "borrow": hashlib.sha256(b"global:lending_account_borrow").digest()[:8],
+    "repay": hashlib.sha256(b"global:lending_account_repay").digest()[:8],
+    "withdraw": hashlib.sha256(b"global:lending_account_withdraw").digest()[:8],
 }
+
+BANK_LIQUIDITY_VAULT_OFFSET = 112
+BANK_ORACLE_SETUP_OFFSET = 617
+BANK_ORACLE_KEYS_OFFSET = 618
+MAX_ORACLE_KEYS = 5
+MARGINFI_ACCOUNT_BALANCES_OFFSET = 72
+BALANCE_SIZE = 104
+MAX_BALANCES = 16
+BALANCE_ACTIVE_OFFSET = 0
+BALANCE_BANK_PK_OFFSET = 1
+ZERO_PUBKEY = Pubkey.from_string("11111111111111111111111111111111")
 
 
 def _derive_ata(owner: Pubkey, mint: Pubkey) -> Pubkey:
@@ -43,6 +54,26 @@ def _derive_ata(owner: Pubkey, mint: Pubkey) -> Pubkey:
         [bytes(owner), bytes(TOKEN_PROGRAM), bytes(mint)], ATA_PROGRAM
     )
     return pda
+
+
+def _pack_deposit_args(amount: int) -> bytes:
+    return DISC["deposit"] + struct.pack("<Q", amount) + b"\x00"
+
+
+def _pack_borrow_args(amount: int) -> bytes:
+    return DISC["borrow"] + struct.pack("<Q", amount)
+
+
+def _pack_repay_args(amount: int, repay_all: bool = False) -> bytes:
+    if repay_all:
+        return DISC["repay"] + struct.pack("<Q", amount) + b"\x01\x01"
+    return DISC["repay"] + struct.pack("<Q", amount) + b"\x00"
+
+
+def _pack_withdraw_args(amount: int, withdraw_all: bool = False) -> bytes:
+    if withdraw_all:
+        return DISC["withdraw"] + struct.pack("<Q", amount) + b"\x01\x01"
+    return DISC["withdraw"] + struct.pack("<Q", amount) + b"\x00"
 
 
 class MarginFiLender:
@@ -128,21 +159,20 @@ class MarginFiLender:
         sol_mint = Pubkey.from_string(SOL_MINT)
         signer_ata = _derive_ata(wallet.pubkey(), sol_mint)
 
-        bank_liquidity_vault = await self._get_bank_vault(SOL_BANK, 112)
+        bank_liquidity_vault = await self._get_bank_vault(SOL_BANK, BANK_LIQUIDITY_VAULT_OFFSET)
 
-        ix_data = DISC["deposit"] + struct.pack("<Q", lamports)
         ix = Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
-                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=False),
                 AccountMeta(pubkey=SOL_BANK, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=bank_liquidity_vault, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
             ],
-            data=ix_data,
+            data=_pack_deposit_args(lamports),
         )
 
         blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
@@ -171,23 +201,24 @@ class MarginFiLender:
         usdc_mint = Pubkey.from_string(USDC_MINT)
         signer_ata = _derive_ata(wallet.pubkey(), usdc_mint)
 
-        bank_liquidity_vault = await self._get_bank_vault(USDC_BANK, 112)
+        bank_liquidity_vault = await self._get_bank_vault(USDC_BANK, BANK_LIQUIDITY_VAULT_OFFSET)
         bank_liquidity_vault_authority = await self._derive_bank_authority(USDC_BANK)
 
-        ix_data = DISC["borrow"] + struct.pack("<Q", atoms)
+        health_accounts = await self._build_health_check_accounts(account)
+
         ix = Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
-                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=False),
                 AccountMeta(pubkey=USDC_BANK, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=bank_liquidity_vault_authority, is_signer=False, is_writable=False),
                 AccountMeta(pubkey=bank_liquidity_vault, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
-            ],
-            data=ix_data,
+            ] + health_accounts,
+            data=_pack_borrow_args(atoms),
         )
 
         blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
@@ -216,21 +247,20 @@ class MarginFiLender:
         usdc_mint = Pubkey.from_string(USDC_MINT)
         signer_ata = _derive_ata(wallet.pubkey(), usdc_mint)
 
-        bank_liquidity_vault = await self._get_bank_vault(USDC_BANK, 112)
+        bank_liquidity_vault = await self._get_bank_vault(USDC_BANK, BANK_LIQUIDITY_VAULT_OFFSET)
 
-        ix_data = DISC["repay"] + struct.pack("<Q", atoms)
         ix = Instruction(
             program_id=MARGINFI_PROGRAM,
             accounts=[
-                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=MARGINFI_GROUP, is_signer=False, is_writable=False),
+                AccountMeta(pubkey=account, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=wallet.pubkey(), is_signer=True, is_writable=False),
                 AccountMeta(pubkey=USDC_BANK, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=signer_ata, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=bank_liquidity_vault, is_signer=False, is_writable=True),
                 AccountMeta(pubkey=TOKEN_PROGRAM, is_signer=False, is_writable=False),
             ],
-            data=ix_data,
+            data=_pack_repay_args(atoms),
         )
 
         blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
@@ -254,6 +284,49 @@ class MarginFiLender:
             raise ValueError(f"Bank not found: {bank}")
         data = bytes(resp.value.data)
         return Pubkey.from_bytes(data[offset:offset + 32])
+
+    async def _get_bank_oracle_keys(self, bank: Pubkey) -> list[Pubkey]:
+        resp = await self.rpc.get_account_info(bank)
+        if not resp.value:
+            raise ValueError(f"Bank not found: {bank}")
+        data = bytes(resp.value.data)
+        oracle_keys = []
+        for i in range(MAX_ORACLE_KEYS):
+            key_start = BANK_ORACLE_KEYS_OFFSET + (i * 32)
+            key = Pubkey.from_bytes(data[key_start:key_start + 32])
+            if key != ZERO_PUBKEY:
+                oracle_keys.append(key)
+        return oracle_keys
+
+    async def _build_health_check_accounts(self, marginfi_account: Pubkey) -> list[AccountMeta]:
+        resp = await self.rpc.get_account_info(marginfi_account)
+        if not resp.value:
+            raise ValueError(f"MarginFi account not found: {marginfi_account}")
+        data = bytes(resp.value.data)
+
+        active_banks = set()
+        for i in range(MAX_BALANCES):
+            balance_start = MARGINFI_ACCOUNT_BALANCES_OFFSET + (i * BALANCE_SIZE)
+            active = data[balance_start + BALANCE_ACTIVE_OFFSET]
+            if active:
+                bank_pk = Pubkey.from_bytes(
+                    data[balance_start + BALANCE_BANK_PK_OFFSET:
+                         balance_start + BALANCE_BANK_PK_OFFSET + 32]
+                )
+                active_banks.add(bank_pk)
+
+        remaining_accounts = []
+        for bank_pk in active_banks:
+            remaining_accounts.append(
+                AccountMeta(pubkey=bank_pk, is_signer=False, is_writable=False)
+            )
+            oracle_keys = await self._get_bank_oracle_keys(bank_pk)
+            for oracle_key in oracle_keys:
+                remaining_accounts.append(
+                    AccountMeta(pubkey=oracle_key, is_signer=False, is_writable=False)
+                )
+
+        return remaining_accounts
 
     async def _derive_bank_authority(self, bank: Pubkey) -> Pubkey:
         pda, _ = Pubkey.find_program_address(

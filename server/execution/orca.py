@@ -29,6 +29,7 @@ from server.config import (
 
 log = logging.getLogger(__name__)
 
+HELIUS_RPC = "https://johnath-nf0ci1-fast-mainnet.helius-rpc.com"
 WHIRLPOOL_PROGRAM_ID = Pubkey.from_string(ORCA_WHIRLPOOL_PROGRAM)
 TOKEN_PROGRAM = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
 ASSOCIATED_TOKEN_PROGRAM = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
@@ -110,6 +111,88 @@ class OrcaExecutor:
 
     def _tick_to_sqrt_price_x64(self, tick: int) -> int:
         return int(math.pow(1.0001, tick / 2) * (2**64))
+
+    async def _tick_array_exists(self, pool: Pubkey, start_tick_index: int) -> bool:
+        pda = _derive_tick_array_pda(pool, start_tick_index)
+        async with AsyncClient(HELIUS_RPC, commitment=Confirmed) as helius:
+            resp = await helius.get_account_info(pda)
+        return resp.value is not None
+
+    async def _find_valid_tick_range(
+        self, pool: Pubkey, target_lower: int, target_upper: int
+    ) -> tuple[int, int]:
+        ticks_per_array = TICK_SPACING * 88
+
+        lower_array_start = _tick_array_start(target_lower, TICK_SPACING)
+        upper_array_start = _tick_array_start(target_upper, TICK_SPACING)
+
+        lower_exists, upper_exists = await asyncio.gather(
+            self._tick_array_exists(pool, lower_array_start),
+            self._tick_array_exists(pool, upper_array_start),
+        )
+
+        if lower_exists and upper_exists:
+            return target_lower, target_upper
+
+        max_search_steps = 50
+
+        valid_lower_start = lower_array_start if lower_exists else None
+        if valid_lower_start is None:
+            for step in range(1, max_search_steps + 1):
+                inward = lower_array_start + step * ticks_per_array
+                outward = lower_array_start - step * ticks_per_array
+                inward_exists, outward_exists = await asyncio.gather(
+                    self._tick_array_exists(pool, inward),
+                    self._tick_array_exists(pool, outward),
+                )
+                if inward_exists:
+                    valid_lower_start = inward
+                    break
+                if outward_exists:
+                    valid_lower_start = outward
+                    break
+            if valid_lower_start is None:
+                raise ValueError(
+                    f"No initialized tick array found near lower tick {target_lower} "
+                    f"after searching {max_search_steps} arrays in each direction"
+                )
+
+        valid_upper_start = upper_array_start if upper_exists else None
+        if valid_upper_start is None:
+            for step in range(1, max_search_steps + 1):
+                outward = upper_array_start + step * ticks_per_array
+                inward = upper_array_start - step * ticks_per_array
+                outward_exists, inward_exists = await asyncio.gather(
+                    self._tick_array_exists(pool, outward),
+                    self._tick_array_exists(pool, inward),
+                )
+                if outward_exists:
+                    valid_upper_start = outward
+                    break
+                if inward_exists:
+                    valid_upper_start = inward
+                    break
+            if valid_upper_start is None:
+                raise ValueError(
+                    f"No initialized tick array found near upper tick {target_upper} "
+                    f"after searching {max_search_steps} arrays in each direction"
+                )
+
+        adjusted_lower = _align_tick(valid_lower_start, TICK_SPACING)
+        adjusted_upper = _align_tick(
+            valid_upper_start + ticks_per_array - TICK_SPACING, TICK_SPACING
+        )
+
+        if adjusted_upper <= adjusted_lower:
+            adjusted_upper = adjusted_lower + TICK_SPACING
+
+        log.info(
+            "tick range adjusted: [%d, %d] -> [%d, %d] (arrays: %d, %d)",
+            target_lower, target_upper, adjusted_lower, adjusted_upper,
+            valid_lower_start, valid_upper_start,
+        )
+
+        return adjusted_lower, adjusted_upper
 
     async def fetch_whirlpool_state(self, pool_address: str | None = None) -> dict:
         address = Pubkey.from_string(pool_address or ORCA_WHIRLPOOL_SOL_USDC)
@@ -246,6 +329,10 @@ class OrcaExecutor:
             }
 
         pool_state = await self.fetch_whirlpool_state(pool)
+
+        lower_tick, upper_tick = await self._find_valid_tick_range(
+            pool_pubkey, lower_tick, upper_tick
+        )
 
         position_mint_kp = Keypair()
         position_mint = position_mint_kp.pubkey()
