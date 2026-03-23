@@ -41,20 +41,20 @@ async def run():
         await lender.stop()
         return
 
-    # Step 2: Deposit 0.01 SOL
-    print("\nStep 2: Deposit 0.01 SOL as collateral")
+    # Step 2: Deposit 0.05 SOL (~$4.50)
+    print("\nStep 2: Deposit 0.05 SOL as collateral")
     try:
-        result = await lender.deposit_sol(kp, 0.01)
+        result = await lender.deposit_sol(kp, 0.05)
         print(f"  [+] Deposit: {result}")
     except Exception as e:
         print(f"  [X] Deposit failed: {e}")
         await lender.stop()
         return
 
-    # Step 3: Borrow $0.50 USDC
-    print("\nStep 3: Borrow $0.50 USDC")
+    # Step 3: Borrow $1.00 USDC (well within 65% LTV of ~$4.50)
+    print("\nStep 3: Borrow $1.00 USDC")
     try:
-        result = await lender.borrow_usdc(kp, 0.50)
+        result = await lender.borrow_usdc(kp, 1.00)
         print(f"  [+] Borrow: {result}")
     except Exception as e:
         print(f"  [X] Borrow failed: {e}")
@@ -63,7 +63,7 @@ async def run():
     # Step 4: Repay
     print("\nStep 4: Repay $0.50 USDC")
     try:
-        result = await lender.repay_usdc(kp, 0.50)
+        result = await lender.repay_usdc(kp, 1.00)
         print(f"  [+] Repay: {result}")
     except Exception as e:
         print(f"  [X] Repay failed: {e}")
