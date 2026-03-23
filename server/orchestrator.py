@@ -282,8 +282,15 @@ class Orchestrator:
         projected_dpy = 0.0
         projected_mpy = 0.0
         projected_apy = 0.0
-        if uptime_hours > 0.1 and self.capital > 0:
-            hourly_return = total_pnl / self.capital / uptime_hours
+
+        oldest_position_age = 0.0
+        for s in self.strategies.values():
+            for pos in s.active_positions:
+                oldest_position_age = max(oldest_position_age, pos.age_hours)
+
+        effective_hours = oldest_position_age if oldest_position_age > 0.1 else uptime_hours
+        if effective_hours > 0.1 and self.capital > 0:
+            hourly_return = total_pnl / self.capital / effective_hours
             projected_dpy = hourly_return * 24 * 100
             projected_mpy = hourly_return * 730 * 100
             projected_apy = hourly_return * 8760 * 100
