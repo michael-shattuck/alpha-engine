@@ -46,7 +46,7 @@ DISC = {
 MFI_ACCOUNT = Pubkey.from_string("C9qzJQLMw2CK8nYMiHVUcKRXjgeG6zsZdUQpPBZh6G6o")
 
 BALANCE_SLOT_SIZE = 104
-BALANCE_OFFSET = 8 + 32 + 32 + 1
+BALANCE_OFFSET = 8 + 32 + 32
 
 
 def _derive_ata(owner: Pubkey, mint: Pubkey) -> Pubkey:
@@ -104,39 +104,36 @@ class MarginFiLender:
                 return
 
             data = bytes(resp.value.data)
-            if len(data) < BALANCE_OFFSET + BALANCE_SLOT_SIZE:
-                log.warning(f"MarginFi account data too short: {len(data)} bytes")
-                return
+            sol_bank_bytes = bytes(SOL_BANK)
+            usdc_bank_bytes = bytes(USDC_BANK)
 
-            sol_deposit = 0.0
-            usdc_borrow = 0.0
+            sol_pos = data.find(sol_bank_bytes)
+            usdc_pos = data.find(usdc_bank_bytes)
 
-            for i in range(16):
-                slot_start = BALANCE_OFFSET + i * BALANCE_SLOT_SIZE
-                if slot_start + BALANCE_SLOT_SIZE > len(data):
-                    break
+            has_sol_deposit = False
+            has_usdc_borrow = False
 
-                active = data[slot_start]
-                if not active:
-                    continue
+            if sol_pos > 0:
+                active = data[sol_pos - 1]
+                asset_shares = _parse_wrapped_i80f48(data, sol_pos + 40)
+                if active and asset_shares > 0.001:
+                    has_sol_deposit = True
+                    self.deposited_sol = asset_shares
+                    log.info(f"Recovered MarginFi SOL deposit: {asset_shares:.2f} share-units")
 
-                bank_pk = Pubkey.from_bytes(data[slot_start + 1:slot_start + 33])
-                asset_shares = _parse_wrapped_i80f48(data, slot_start + 33)
-                liability_shares = _parse_wrapped_i80f48(data, slot_start + 33 + 16)
+            if usdc_pos > 0:
+                active = data[usdc_pos - 1]
+                liab_shares = _parse_wrapped_i80f48(data, usdc_pos + 56)
+                if active and liab_shares > 0.001:
+                    has_usdc_borrow = True
+                    self.borrowed_usdc = liab_shares
+                    log.info(f"Recovered MarginFi USDC borrow: {liab_shares:.2f} share-units")
 
-                if bank_pk == SOL_BANK and asset_shares > 0.001:
-                    sol_deposit = asset_shares
-                    log.info(f"Recovered MarginFi SOL deposit: {sol_deposit:.6f} share-units")
-
-                if bank_pk == USDC_BANK and liability_shares > 0.001:
-                    usdc_borrow = liability_shares
-                    log.info(f"Recovered MarginFi USDC borrow: {usdc_borrow:.6f} share-units")
-
-            self.deposited_sol = sol_deposit
-            self.borrowed_usdc = usdc_borrow
-
-            if sol_deposit > 0 or usdc_borrow > 0:
-                log.warning(f"MarginFi state recovered: deposited_sol={sol_deposit:.4f}, borrowed_usdc={usdc_borrow:.4f}")
+            if has_sol_deposit or has_usdc_borrow:
+                log.warning(f"MarginFi active position detected on-chain (shares, not tokens)")
+            else:
+                self.deposited_sol = 0
+                self.borrowed_usdc = 0
         except Exception as e:
             log.error(f"MarginFi state recovery failed: {e}")
 
