@@ -302,7 +302,7 @@ class LeveragedLPStrategy(BaseStrategy):
                     self.error = str(e)
                     self._last_error_time = time.time()
                 if pos.metadata.get("borrowed_usd", 0) > 0 and self.lender:
-                    await self._repay_leverage(sol_price)
+                    await self._repay_leverage(sol_price, pos.metadata["borrowed_usd"])
                 pnl = pos.current_value_usd + pos.fees_earned_usd - pos.metadata.get("equity", 0)
                 await alerts.position_closed("deleverage", pnl)
             self.close_position(action["position_id"])
@@ -318,7 +318,7 @@ class LeveragedLPStrategy(BaseStrategy):
                     self._record_action()
                     self._last_close_time = time.time()
                     if old.metadata.get("borrowed_usd", 0) > 0 and self.lender:
-                        await self._repay_leverage(sol_price)
+                        await self._repay_leverage(sol_price, old.metadata["borrowed_usd"])
                     borrowed = old.metadata.get("borrowed_usd", 0)
                     net = old.current_value_usd + old.fees_earned_usd - borrowed
                     self.capital_allocated = max(net, self.capital_allocated)
@@ -343,7 +343,7 @@ class LeveragedLPStrategy(BaseStrategy):
                     self._record_action()
                     self._last_close_time = time.time()
                     if old.metadata.get("borrowed_usd", 0) > 0 and self.lender:
-                        await self._repay_leverage(sol_price)
+                        await self._repay_leverage(sol_price, old.metadata["borrowed_usd"])
                     borrowed = old.metadata.get("borrowed_usd", 0)
                     net = old.current_value_usd + old.fees_earned_usd - borrowed
                     self.capital_allocated = max(net, self.capital_allocated)
@@ -521,16 +521,20 @@ class LeveragedLPStrategy(BaseStrategy):
 
         return None
 
-    async def _repay_leverage(self, sol_price: float):
+    async def _repay_leverage(self, sol_price: float, borrowed_usd: float = 0):
         if not self.lender:
             return
         await self.lender.recover_state()
-        if self.lender.borrowed_usdc <= 0 and self.lender.deposited_sol <= 0:
+        if not self.lender.get_state()["has_position"]:
             return
-        if self.lender.borrowed_usdc > 0:
+
+        if borrowed_usd <= 0:
+            for p in self.active_positions:
+                borrowed_usd = max(borrowed_usd, p.metadata.get("borrowed_usd", 0))
+
+        if borrowed_usd > 0:
             try:
-                usdc_owed = self.lender.borrowed_usdc
-                swap_sol = (usdc_owed * 1.05) / sol_price
+                swap_sol = (borrowed_usd * 1.05) / sol_price
                 balance_resp = await self.orca.rpc.get_balance(self.orca.keypair.pubkey())
                 available_sol = balance_resp.value / 1e9 - 0.05
                 swap_sol = min(swap_sol, max(available_sol, 0))
@@ -540,7 +544,7 @@ class LeveragedLPStrategy(BaseStrategy):
                         self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC,
                         swap_lamports, a_to_b=True,
                     )
-                    log.info(f"Swapped {swap_sol:.4f} SOL->USDC for repay: {swap_result.get('signature')}")
+                    log.info(f"Swapped {swap_sol:.4f} SOL->USDC for repay of ${borrowed_usd:.2f}: {swap_result.get('signature')}")
             except Exception as e:
                 log.error(f"SOL->USDC swap for repay failed: {e}")
         try:
