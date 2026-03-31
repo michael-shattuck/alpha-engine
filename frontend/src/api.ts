@@ -192,9 +192,12 @@ export interface PortfolioData {
     positions: Array<{
       market_index: number
       direction: string
-      size: number
-      quote_entry: number
-      pnl: number
+      size_tokens?: number
+      size?: number
+      entry_price?: number
+      notional?: number
+      quote_entry?: number
+      pnl?: number
     }>
   }
   total_usd: number

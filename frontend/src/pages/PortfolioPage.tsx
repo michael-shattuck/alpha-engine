@@ -130,10 +130,11 @@ export default function PortfolioPage() {
                         <span className="text-xs font-medium text-white">
                           {MARKET_NAMES[pos.market_index] ?? `#${pos.market_index}`}
                         </span>
-                        <span className="text-[10px] text-gray-500">{pos.size.toFixed(4)}</span>
+                        <span className="text-[10px] text-gray-500">{(pos.size_tokens ?? pos.size ?? 0).toFixed(4)}</span>
+                        <span className="text-[10px] text-gray-600">${(pos.notional ?? 0).toFixed(2)}</span>
                       </div>
-                      <div className={`font-mono text-xs font-bold ${pos.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {pos.pnl >= 0 ? '+' : ''}{fmt(pos.pnl)}
+                      <div className={`font-mono text-xs font-bold ${(pos.pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {(pos.pnl ?? 0) >= 0 ? '+' : ''}{fmt(pos.pnl ?? 0)}
                       </div>
                     </div>
                   ))}
