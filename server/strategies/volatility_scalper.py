@@ -21,7 +21,6 @@ class VolatilityScalper(BaseStrategy):
     STRATEGY_NAME = "Volatility Scalper"
 
     MAX_CONCURRENT_POSITIONS = 7
-    MAX_TRADES_PER_DAY = 999999
     MAX_LEVERAGE = 3.0
     MIN_TRADE_USD = 10.0
     POSITION_SIZE_PCT = 0.14
@@ -223,11 +222,8 @@ class VolatilityScalper(BaseStrategy):
         if active_count >= self.MAX_CONCURRENT_POSITIONS:
             return {"action": "hold", "reason": "max_positions"}
 
-        if self._daily_trade_count >= self.MAX_TRADES_PER_DAY:
-            return {"action": "wait", "reason": "daily_trade_limit"}
-
-        if self.capital_allocated > 0 and abs(self._daily_pnl / self.capital_allocated) > self.DAILY_LOSS_LIMIT_PCT / 100:
-            if self._daily_pnl < 0:
+        if self.capital_allocated > 0 and self._daily_pnl < 0:
+            if abs(self._daily_pnl / self.capital_allocated) > self.DAILY_LOSS_LIMIT_PCT / 100:
                 return {"action": "wait", "reason": "daily_loss_limit"}
 
         now = time.time()
