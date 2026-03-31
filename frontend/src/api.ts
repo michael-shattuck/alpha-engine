@@ -130,7 +130,29 @@ export interface ScalperTrade {
   signal_confidence: number
 }
 
+export interface ScalperAsset {
+  symbol: string
+  price: number
+  regime: string
+  regime_confidence: number
+  rsi_5m: number
+  adx: number
+  bbw: number
+  velocity: number
+  signal: string
+  signal_confidence: number
+  signal_reason: string
+  active_trade: {
+    direction: string
+    entry_price: number
+    pnl_pct: number
+    stop_loss: number
+    take_profit: number
+  } | null
+}
+
 export interface ScalperState {
+  assets: ScalperAsset[]
   active_trades: ScalperTrade[]
   daily_stats: {
     trades_today: number

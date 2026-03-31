@@ -72,6 +72,78 @@ export default function ScalperPage() {
           </div>
         </div>
 
+        {(sc?.assets ?? []).length > 0 && (
+          <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
+            <h3 className="mb-3 text-xs font-medium tracking-wide text-gray-500 uppercase">Tracked Assets</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-gray-600">
+                    <th className="pb-2 pr-3">Asset</th>
+                    <th className="pb-2 pr-3">Price</th>
+                    <th className="pb-2 pr-3">Regime</th>
+                    <th className="pb-2 pr-3">RSI</th>
+                    <th className="pb-2 pr-3">Velocity</th>
+                    <th className="pb-2 pr-3">Signal</th>
+                    <th className="pb-2">Position</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sc!.assets.map(a => (
+                    <tr key={a.symbol} className="border-t border-gray-800/50">
+                      <td className="py-2 pr-3 font-medium text-white">{a.symbol}</td>
+                      <td className="py-2 pr-3 font-mono text-gray-300" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        ${a.price > 1 ? a.price.toFixed(2) : a.price.toFixed(6)}
+                      </td>
+                      <td className="py-2 pr-3">
+                        <span className={`${REGIME_COLORS[a.regime] ?? 'text-gray-500'}`}>
+                          {REGIME_LABELS[a.regime] ?? a.regime}
+                        </span>
+                      </td>
+                      <td className={`py-2 pr-3 font-mono ${
+                        a.rsi_5m < 30 ? 'text-green-400 font-bold' :
+                        a.rsi_5m > 70 ? 'text-red-400 font-bold' :
+                        a.rsi_5m < 35 ? 'text-green-400' :
+                        a.rsi_5m > 65 ? 'text-red-400' : 'text-gray-400'
+                      }`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {a.rsi_5m.toFixed(1)}
+                      </td>
+                      <td className={`py-2 pr-3 font-mono ${
+                        a.velocity > 0.3 ? 'text-green-400' : a.velocity < -0.3 ? 'text-red-400' : 'text-gray-500'
+                      }`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {a.velocity >= 0 ? '+' : ''}{a.velocity.toFixed(2)}%
+                      </td>
+                      <td className="py-2 pr-3">
+                        {a.signal !== 'no_signal' && a.signal !== 'none' ? (
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                            a.signal === 'long' ? 'bg-green-500/15 text-green-400' :
+                            a.signal === 'short' ? 'bg-red-500/15 text-red-400' : 'text-gray-500'
+                          }`}>
+                            {a.signal.toUpperCase()} ({(a.signal_confidence * 100).toFixed(0)}%)
+                          </span>
+                        ) : (
+                          <span className="text-gray-600 text-[10px]">{a.signal_reason.slice(0, 20)}</span>
+                        )}
+                      </td>
+                      <td className="py-2">
+                        {a.active_trade ? (
+                          <span className={`font-mono text-[10px] font-bold ${
+                            a.active_trade.pnl_pct >= 0 ? 'text-green-400' : 'text-red-400'
+                          }`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {a.active_trade.direction.toUpperCase()} {a.active_trade.pnl_pct >= 0 ? '+' : ''}{a.active_trade.pnl_pct.toFixed(2)}%
+                          </span>
+                        ) : (
+                          <span className="text-gray-600 text-[10px]">--</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
           <h3 className="mb-3 text-xs font-medium tracking-wide text-gray-500 uppercase">Active Trades</h3>
           {(sc?.active_trades ?? []).length > 0 ? (

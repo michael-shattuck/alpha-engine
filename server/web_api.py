@@ -258,13 +258,46 @@ async def get_scalper():
     if not scalper:
         return {}
     state = scalper.get_state()
+    metrics = state.get("metrics", {})
+
+    assets = []
+    for asset, engine in scalper.engines.items():
+        price = scalper._asset_prices.get(asset, 0)
+        assessment = engine.regime_detector._last_assessment
+        snap = engine.get_indicator_snapshot() if engine.is_warmed_up else {}
+        active_trade = next((t for t in scalper._active_trades if t.get("asset") == asset and t["status"] == "active"), None)
+        signal = engine.evaluate(price) if engine.is_warmed_up and price > 0 else None
+
+        assets.append({
+            "symbol": asset,
+            "price": price,
+            "regime": assessment.regime.value if assessment else "unknown",
+            "regime_confidence": assessment.confidence if assessment else 0,
+            "rsi_5m": snap.get("rsi_5m", 50),
+            "adx": snap.get("adx_1h", 0),
+            "bbw": snap.get("bb_width_1h", 0),
+            "velocity": snap.get("velocity_5m", 0),
+            "signal": signal.type.value if signal else "none",
+            "signal_confidence": signal.confidence if signal else 0,
+            "signal_reason": signal.reason if signal else "",
+            "active_trade": {
+                "direction": active_trade["direction"],
+                "entry_price": active_trade["entry_price"],
+                "pnl_pct": active_trade["pnl_pct"],
+                "stop_loss": active_trade["stop_loss"],
+                "take_profit": active_trade["take_profit"],
+            } if active_trade else None,
+        })
+
     return {
+        "assets": assets,
         "active_trades": state.get("active_trades", []),
         "daily_stats": state.get("daily_stats", {}),
         "indicators": state.get("indicators", {}),
         "signal_performance": state.get("signal_performance", {}),
-        "regime": state.get("metrics", {}).get("regime", "unknown"),
-        "regime_confidence": state.get("metrics", {}).get("regime_confidence", 0),
+        "regime": metrics.get("regime", "unknown"),
+        "regime_confidence": metrics.get("regime_confidence", 0),
+        "asset_regimes": metrics.get("asset_regimes", {}),
     }
 
 
