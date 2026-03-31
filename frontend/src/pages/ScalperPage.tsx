@@ -178,29 +178,83 @@ export default function ScalperPage() {
         )}
 
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
-          <h3 className="mb-3 text-xs font-medium tracking-wide text-gray-500 uppercase">Active Trades</h3>
-          {(sc?.active_trades ?? []).length > 0 ? (
-            <div className="space-y-2">
-              {sc!.active_trades.map(trade => (
-                <div key={trade.id} className="rounded border border-gray-800 bg-gray-950/50 p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold uppercase ${trade.direction === 'long' ? 'text-green-400' : 'text-red-400'}`}>{trade.direction}</span>
-                      <span className="text-[10px] text-gray-500">{trade.trade_type}</span>
-                      <span className="text-[10px] text-gray-600">{trade.leverage}x</span>
+          <h3 className="mb-3 text-xs font-medium tracking-wide text-gray-500 uppercase">Active Trades ({activeTrades.length})</h3>
+          {activeTrades.length > 0 ? (
+            <div className="space-y-3">
+              {activeTrades.map((trade) => {
+                const t = trade as unknown as { id: string; direction: string; trade_type: string; asset: string; entry_price: number; current_price: number; stop_loss: number; take_profit: number; size_usd: number; leverage: number; collateral_usd: number; pnl_usd: number; pnl_pct: number; regime_at_entry: string; signal_confidence: number; opened_at: number }
+                const priceFmt = t.entry_price > 1 ? 2 : 6
+                const age = Math.max(0, (Date.now() / 1000 - t.opened_at) / 60)
+                const slDist = Math.abs(t.stop_loss - t.entry_price) / t.entry_price * 100
+                const tpDist = Math.abs(t.take_profit - t.entry_price) / t.entry_price * 100
+                const progress = t.direction === 'long'
+                  ? (t.current_price - t.entry_price) / (t.take_profit - t.entry_price) * 100
+                  : (t.entry_price - t.current_price) / (t.entry_price - t.take_profit) * 100
+
+                return (
+                  <div key={t.id} className={`rounded border p-3 ${
+                    t.pnl_pct >= 0 ? 'border-green-800/30 bg-green-950/10' : 'border-red-800/30 bg-red-950/10'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`rounded px-2 py-0.5 text-xs font-bold uppercase ${
+                          t.direction === 'long' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                        }`}>{t.direction}</span>
+                        <span className="text-sm font-medium text-white">{t.asset}</span>
+                        <span className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] text-gray-400">{t.leverage}x</span>
+                        <span className="text-[10px] text-gray-600">{t.trade_type}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className={`font-mono text-sm font-bold ${t.pnl_pct >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {t.pnl_pct >= 0 ? '+' : ''}{t.pnl_pct.toFixed(2)}% (${t.pnl_usd >= 0 ? '+' : ''}{t.pnl_usd.toFixed(2)})
+                        </div>
+                      </div>
                     </div>
-                    <span className={`font-mono text-sm font-bold ${trade.pnl_pct >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {trade.pnl_pct >= 0 ? '+' : ''}{trade.pnl_pct.toFixed(2)}%
-                    </span>
+
+                    <div className="grid grid-cols-5 gap-3 mb-2">
+                      <div>
+                        <div className="text-[10px] text-gray-600">Size</div>
+                        <div className="font-mono text-xs text-white" style={{ fontVariantNumeric: 'tabular-nums' }}>${t.size_usd.toFixed(0)}</div>
+                        <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>(${t.collateral_usd.toFixed(0)} equity)</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-gray-600">Entry</div>
+                        <div className="font-mono text-xs text-gray-300" style={{ fontVariantNumeric: 'tabular-nums' }}>${t.entry_price.toFixed(priceFmt)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-gray-600">Current</div>
+                        <div className="font-mono text-xs text-white" style={{ fontVariantNumeric: 'tabular-nums' }}>${t.current_price.toFixed(priceFmt)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-gray-600">Stop Loss</div>
+                        <div className="font-mono text-xs text-red-400" style={{ fontVariantNumeric: 'tabular-nums' }}>${t.stop_loss.toFixed(priceFmt)}</div>
+                        <div className="font-mono text-[10px] text-gray-600" style={{ fontVariantNumeric: 'tabular-nums' }}>-{slDist.toFixed(2)}%</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-gray-600">Take Profit</div>
+                        <div className="font-mono text-xs text-green-400" style={{ fontVariantNumeric: 'tabular-nums' }}>${t.take_profit.toFixed(priceFmt)}</div>
+                        <div className="font-mono text-[10px] text-gray-600" style={{ fontVariantNumeric: 'tabular-nums' }}>+{tpDist.toFixed(2)}%</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between text-[10px] mb-1">
+                          <span className="text-red-400">SL</span>
+                          <span className="text-gray-500">{Math.min(Math.max(progress, 0), 100).toFixed(0)}% to TP</span>
+                          <span className="text-green-400">TP</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-gray-800 overflow-hidden relative">
+                          <div className={`absolute top-0 h-full rounded-full ${t.pnl_pct >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
+                            style={{ width: `${Math.min(Math.max(progress, 0), 100)}%`, left: '0' }} />
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-gray-600">{age.toFixed(0)}m</div>
+                      <div className="text-[10px] text-gray-600">{(t.signal_confidence * 100).toFixed(0)}% conf</div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-4 gap-2 text-[10px]">
-                    <div><span className="text-gray-600">Entry</span><br/><span className="font-mono text-gray-300" style={{ fontVariantNumeric: 'tabular-nums' }}>${trade.entry_price.toFixed(2)}</span></div>
-                    <div><span className="text-gray-600">Current</span><br/><span className="font-mono text-gray-300" style={{ fontVariantNumeric: 'tabular-nums' }}>${trade.current_price.toFixed(2)}</span></div>
-                    <div><span className="text-gray-600">SL</span><br/><span className="font-mono text-red-400" style={{ fontVariantNumeric: 'tabular-nums' }}>${trade.stop_loss.toFixed(2)}</span></div>
-                    <div><span className="text-gray-600">TP</span><br/><span className="font-mono text-green-400" style={{ fontVariantNumeric: 'tabular-nums' }}>${trade.take_profit.toFixed(2)}</span></div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ) : (
             <div className="py-4 text-center text-sm text-gray-600">No active trades</div>
