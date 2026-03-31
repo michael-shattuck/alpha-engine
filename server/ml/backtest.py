@@ -117,8 +117,9 @@ def score_short(rsi: float, rsi_prev: float, bb_pos: float, velocity: float,
     return score, reasons
 
 
-def run_backtest(asset: str, cfg: BacktestConfig = BacktestConfig()) -> dict:
-    candles = load_candles(asset, limit=200000)
+def run_backtest(asset: str, cfg: BacktestConfig = BacktestConfig(), candles: list[dict] | None = None) -> dict:
+    if candles is None:
+        candles = load_candles(asset, limit=200000)
     if len(candles) < 100:
         return {"error": f"Only {len(candles)} candles for {asset}"}
 
@@ -236,6 +237,10 @@ def run_backtest(asset: str, cfg: BacktestConfig = BacktestConfig()) -> dict:
 
 
 def optimize(asset: str) -> dict:
+    candles = load_candles(asset, limit=200000)
+    if len(candles) < 100:
+        return {"error": f"Only {len(candles)} candles"}
+
     best = None
     best_daily = -999
 
@@ -253,17 +258,17 @@ def optimize(asset: str) -> dict:
                             rsi_short_threshold=rsi_s,
                         ))
 
-    log.info(f"Testing {len(configs)} configurations on {asset}...")
+    log.info(f"Testing {len(configs)} configurations on {asset} ({len(candles)} candles)...")
 
     for i, cfg in enumerate(configs):
-        result = run_backtest(asset, cfg)
+        result = run_backtest(asset, cfg, candles=candles)
         if result.get("trades", 0) < 10:
             continue
 
         wr = result.get("win_rate", 0)
         daily = result.get("daily_pnl", 0)
 
-        if daily > best_daily and wr >= 60:
+        if daily > best_daily and wr >= 55:
             best_daily = daily
             best = result
 
