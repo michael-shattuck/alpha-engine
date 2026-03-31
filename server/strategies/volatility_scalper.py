@@ -183,10 +183,8 @@ class VolatilityScalper(BaseStrategy):
                 raw_pnl = (trade["entry_price"] - price) / trade["entry_price"] * trade["leverage"]
                 trade["peak_price"] = min(trade.get("peak_price", trade["entry_price"]), price)
 
-            fee_pct = 0.001 * trade["leverage"]
-            pnl_pct = raw_pnl - fee_pct
-            trade["pnl_pct"] = pnl_pct * 100
-            trade["pnl_usd"] = trade["collateral_usd"] * pnl_pct
+            trade["pnl_pct"] = raw_pnl * 100
+            trade["pnl_usd"] = trade["collateral_usd"] * raw_pnl
             trade["last_update"] = now
 
             new_sl = engine.update_trailing_stop(trade, price)
