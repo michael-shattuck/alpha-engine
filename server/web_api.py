@@ -315,28 +315,31 @@ async def get_portfolio():
     # Wallet balances
     sol_balance = 0.0
     usdc_balance = 0.0
-    lp = orchestrator.strategies.get("leveraged_lp")
-    if lp and hasattr(lp, "orca") and lp.orca and lp.orca.rpc:
-        try:
-            from solders.pubkey import Pubkey
-            bal = await lp.orca.rpc.get_balance(lp.orca.keypair.pubkey())
-            sol_balance = bal.value / 1e9
+    try:
+        import base58, httpx
+        from solders.pubkey import Pubkey
+        from solders.keypair import Keypair
+        from server.config import WALLET_PRIVATE_KEY
+        kp = Keypair.from_bytes(base58.b58decode(WALLET_PRIVATE_KEY))
+        w = kp.pubkey()
+        async with httpx.AsyncClient(timeout=10) as http:
+            r = await http.post(HELIUS_RPC_URL, json={
+                "jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [str(w)]
+            })
+            sol_balance = r.json().get("result", {}).get("value", 0) / 1e9
+
             usdc_mint = Pubkey.from_string("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
             token_prog = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
             ata_prog = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
-            usdc_ata, _ = Pubkey.find_program_address(
-                [bytes(lp.orca.keypair.pubkey()), bytes(token_prog), bytes(usdc_mint)], ata_prog
-            )
-            import httpx
-            async with httpx.AsyncClient(timeout=10) as http:
-                r = await http.post(HELIUS_RPC_URL, json={
-                    "jsonrpc": "2.0", "id": 1, "method": "getTokenAccountBalance",
-                    "params": [str(usdc_ata)]
-                })
-                result = r.json().get("result", {}).get("value", {})
-                usdc_balance = float(result.get("uiAmount", 0) or 0)
-        except Exception:
-            pass
+            usdc_ata, _ = Pubkey.find_program_address([bytes(w), bytes(token_prog), bytes(usdc_mint)], ata_prog)
+            r2 = await http.post(HELIUS_RPC_URL, json={
+                "jsonrpc": "2.0", "id": 1, "method": "getTokenAccountBalance",
+                "params": [str(usdc_ata)]
+            })
+            result = r2.json().get("result", {}).get("value", {})
+            usdc_balance = float(result.get("uiAmount", 0) or 0)
+    except Exception:
+        pass
 
     wallet_usd = sol_balance * sol_price + usdc_balance
 

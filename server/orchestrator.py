@@ -40,11 +40,11 @@ class Orchestrator:
 
     def register_strategy(self, strategy: BaseStrategy, dormant: bool = False):
         self.strategies[strategy.STRATEGY_ID] = strategy
-        if dormant:
-            strategy.enabled = False
         existing = self.state.get_strategy(strategy.STRATEGY_ID)
         if existing:
             strategy.load_state(existing)
+        if dormant:
+            strategy.enabled = False
 
     async def start(self):
         log.info(f"Starting orchestrator: mode={self.mode}, capital=${self.capital:.2f}")
