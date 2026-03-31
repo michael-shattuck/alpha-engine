@@ -55,15 +55,15 @@ class DriftExecutor:
         connection = AsyncClient(HELIUS_RPC_URL or SOLANA_RPC_URL, commitment=Confirmed)
         keypair = Keypair.from_bytes(base58.b58decode(WALLET_PRIVATE_KEY))
 
-        self.client = DriftClient(
-            connection,
-            keypair,
-            account_subscription=None,
-        )
-        await self.client.subscribe()
-        self.user = self.client.get_user()
-        self._started = True
-        log.info("Drift executor started (live)")
+        try:
+            self.client = DriftClient(connection, keypair)
+            await self.client.subscribe()
+            self.user = self.client.get_user()
+            self._started = True
+            log.info("Drift executor started (live)")
+        except Exception as e:
+            log.error(f"Drift init failed: {e}")
+            self.client = None
 
     async def stop(self):
         if self.client:
