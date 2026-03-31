@@ -26,10 +26,12 @@ MARKET_INDEX = {
     "SOL": 0,
     "BTC": 1,
     "ETH": 2,
+    "SUI": 9,
+    "PYTH": 18,
+    "JTO": 20,
+    "SEI": 21,
     "JUP": 24,
-    "JTO": 26,
-    "PYTH": 27,
-    "W": 36,
+    "W": 27,
 }
 
 

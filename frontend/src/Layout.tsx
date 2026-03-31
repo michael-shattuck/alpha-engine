@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Dashboard' },
   { to: '/lp', label: 'LP Strategy' },
   { to: '/scalper', label: 'Scalper' },
+  { to: '/portfolio', label: 'Portfolio' },
   { to: '/risk', label: 'Risk' },
 ]
 

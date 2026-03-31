@@ -176,3 +176,30 @@ export interface ScalperState {
 export function fetchScalper(): Promise<ScalperState> {
   return request<ScalperState>('/api/scalper')
 }
+
+export interface PortfolioData {
+  sol_price: number
+  wallet: {
+    sol_balance: number
+    sol_usd: number
+    usdc_balance: number
+    total_usd: number
+  }
+  drift: {
+    collateral: number
+    free_collateral: number
+    unrealized_pnl: number
+    positions: Array<{
+      market_index: number
+      direction: string
+      size: number
+      quote_entry: number
+      pnl: number
+    }>
+  }
+  total_usd: number
+}
+
+export function fetchPortfolio(): Promise<PortfolioData> {
+  return request<PortfolioData>('/api/portfolio')
+}

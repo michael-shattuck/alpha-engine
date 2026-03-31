@@ -308,6 +308,94 @@ async def get_allocator():
     return orchestrator.allocator.get_state()
 
 
+@app.get("/api/portfolio")
+async def get_portfolio():
+    sol_price = orchestrator.prices.sol_price
+
+    # Wallet balances
+    sol_balance = 0.0
+    usdc_balance = 0.0
+    lp = orchestrator.strategies.get("leveraged_lp")
+    if lp and hasattr(lp, "orca") and lp.orca and lp.orca.rpc:
+        try:
+            from solders.pubkey import Pubkey
+            bal = await lp.orca.rpc.get_balance(lp.orca.keypair.pubkey())
+            sol_balance = bal.value / 1e9
+            usdc_mint = Pubkey.from_string("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+            token_prog = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
+            ata_prog = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+            usdc_ata, _ = Pubkey.find_program_address(
+                [bytes(lp.orca.keypair.pubkey()), bytes(token_prog), bytes(usdc_mint)], ata_prog
+            )
+            import httpx
+            async with httpx.AsyncClient(timeout=10) as http:
+                r = await http.post(HELIUS_RPC_URL, json={
+                    "jsonrpc": "2.0", "id": 1, "method": "getTokenAccountBalance",
+                    "params": [str(usdc_ata)]
+                })
+                result = r.json().get("result", {}).get("value", {})
+                usdc_balance = float(result.get("uiAmount", 0) or 0)
+        except Exception:
+            pass
+
+    wallet_usd = sol_balance * sol_price + usdc_balance
+
+    # Drift account
+    drift_collateral = 0.0
+    drift_free = 0.0
+    drift_pnl = 0.0
+    drift_positions = []
+    try:
+        from driftpy.drift_client import DriftClient
+        from solana.rpc.async_api import AsyncClient as DriftRpc
+        from solana.rpc.commitment import Confirmed
+        import base58
+        from solders.keypair import Keypair as DriftKp
+        from server.config import WALLET_PRIVATE_KEY
+        conn = DriftRpc(HELIUS_RPC_URL, commitment=Confirmed)
+        kp = DriftKp.from_bytes(base58.b58decode(WALLET_PRIVATE_KEY))
+        dc = DriftClient(conn, kp)
+        await dc.subscribe()
+        user = dc.get_user()
+        if user:
+            drift_collateral = user.get_total_collateral() / 1e6
+            drift_free = user.get_free_collateral() / 1e6
+            drift_pnl = user.get_unrealized_pnl(True) / 1e6
+            for i in range(len(user.get_user_account().perp_positions)):
+                pos = user.get_user_account().perp_positions[i]
+                if pos.base_asset_amount != 0:
+                    drift_positions.append({
+                        "market_index": pos.market_index,
+                        "direction": "long" if pos.base_asset_amount > 0 else "short",
+                        "size": abs(pos.base_asset_amount) / 1e9,
+                        "quote_entry": pos.quote_entry_amount / 1e6,
+                        "pnl": pos.quote_asset_amount / 1e6,
+                    })
+        await dc.unsubscribe()
+        await conn.close()
+    except Exception:
+        pass
+
+    total_usd = wallet_usd + drift_collateral
+
+    return {
+        "sol_price": sol_price,
+        "wallet": {
+            "sol_balance": sol_balance,
+            "sol_usd": sol_balance * sol_price,
+            "usdc_balance": usdc_balance,
+            "total_usd": wallet_usd,
+        },
+        "drift": {
+            "collateral": drift_collateral,
+            "free_collateral": drift_free,
+            "unrealized_pnl": drift_pnl,
+            "positions": drift_positions,
+        },
+        "total_usd": total_usd,
+    }
+
+
 @app.get("/api/lifecycle")
 async def get_lifecycle():
     lp = orchestrator.strategies.get("leveraged_lp")
