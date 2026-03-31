@@ -280,13 +280,15 @@ class VolatilityScalper(BaseStrategy):
             leverage = action["leverage"]
             direction = "long" if act == "open_long" else "short"
 
+            asset_price = self._asset_prices.get(signal.asset, sol_price)
+
             trade = {
                 "id": str(uuid.uuid4())[:12],
                 "direction": direction,
                 "trade_type": signal.trade_type,
-                "asset": "SOL",
-                "entry_price": sol_price,
-                "current_price": sol_price,
+                "asset": signal.asset,
+                "entry_price": asset_price,
+                "current_price": asset_price,
                 "stop_loss": signal.stop_loss,
                 "take_profit": signal.take_profit,
                 "size_usd": size * leverage,
