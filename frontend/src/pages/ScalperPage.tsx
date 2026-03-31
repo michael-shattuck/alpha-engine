@@ -187,9 +187,11 @@ export default function ScalperPage() {
                 const age = Math.max(0, (Date.now() / 1000 - t.opened_at) / 60)
                 const slDist = Math.abs(t.stop_loss - t.entry_price) / t.entry_price * 100
                 const tpDist = Math.abs(t.take_profit - t.entry_price) / t.entry_price * 100
-                const progress = t.direction === 'long'
-                  ? (t.current_price - t.entry_price) / (t.take_profit - t.entry_price) * 100
-                  : (t.entry_price - t.current_price) / (t.entry_price - t.take_profit) * 100
+                const totalRange = Math.abs(t.take_profit - t.stop_loss)
+                const pricePos = t.direction === 'long'
+                  ? (t.current_price - t.stop_loss) / totalRange * 100
+                  : (t.stop_loss - t.current_price) / totalRange * 100
+                const progress = Math.max(0, Math.min(100, pricePos))
 
                 return (
                   <div key={t.id} className={`rounded border p-3 ${
@@ -240,17 +242,31 @@ export default function ScalperPage() {
                     <div className="flex items-center gap-3">
                       <div className="flex-1">
                         <div className="flex items-center justify-between text-[10px] mb-1">
-                          <span className="text-red-400">SL</span>
-                          <span className="text-gray-500">{Math.min(Math.max(progress, 0), 100).toFixed(0)}% to TP</span>
-                          <span className="text-green-400">TP</span>
+                          <span className="text-red-400">SL (-{slDist.toFixed(1)}%)</span>
+                          <span className={`font-mono font-bold ${t.pnl_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {t.pnl_pct >= 0 ? '+' : ''}{t.pnl_pct.toFixed(2)}%
+                          </span>
+                          <span className="text-green-400">TP (+{tpDist.toFixed(1)}%)</span>
                         </div>
-                        <div className="h-1.5 rounded-full bg-gray-800 overflow-hidden relative">
-                          <div className={`absolute top-0 h-full rounded-full ${t.pnl_pct >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-                            style={{ width: `${Math.min(Math.max(progress, 0), 100)}%`, left: '0' }} />
+                        <div className="h-2 rounded-full bg-gray-800 overflow-hidden relative">
+                          {(() => {
+                            const entryPct = Math.abs(t.entry_price - t.stop_loss) / totalRange * 100
+                            return (
+                              <>
+                                <div className="absolute top-0 h-full w-px bg-gray-500" style={{ left: `${entryPct}%` }} />
+                                <div className={`absolute top-0 h-full rounded-full transition-all ${t.pnl_pct >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
+                                  style={t.pnl_pct >= 0
+                                    ? { left: `${entryPct}%`, width: `${progress - entryPct}%` }
+                                    : { left: `${progress}%`, width: `${entryPct - progress}%` }
+                                  } />
+                                <div className={`absolute top-0 h-full w-1.5 rounded-full ${t.pnl_pct >= 0 ? 'bg-green-400' : 'bg-red-400'}`}
+                                  style={{ left: `${Math.max(0, Math.min(99, progress))}%` }} />
+                              </>
+                            )
+                          })()}
                         </div>
                       </div>
-                      <div className="text-[10px] text-gray-600">{age.toFixed(0)}m</div>
-                      <div className="text-[10px] text-gray-600">{(t.signal_confidence * 100).toFixed(0)}% conf</div>
+                      <div className="text-[10px] text-gray-600 whitespace-nowrap">{age.toFixed(0)}m | {(t.signal_confidence * 100).toFixed(0)}%</div>
                     </div>
                   </div>
                 )
