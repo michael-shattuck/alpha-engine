@@ -61,6 +61,14 @@ class VolatilityScalper(BaseStrategy):
             if self._asset_prices.get(asset, 0) <= 0:
                 log.warning(f"No price for {asset} after initial fetch")
 
+        if DATABASE_URL:
+            active = TradeStore.get_active()
+            if active:
+                self._active_trades = active
+                log.info(f"Restored {len(active)} active trades from DB")
+            else:
+                log.info("No active trades in DB")
+
         async with httpx.AsyncClient(timeout=60) as http:
             for asset, engine in self.engines.items():
                 try:
@@ -534,7 +542,6 @@ class VolatilityScalper(BaseStrategy):
 
     def load_state(self, state: dict):
         super().load_state(state)
-        self._active_trades = state.get("active_trades", [])
         self._trade_log = state.get("trade_log", [])
         ds = state.get("daily_stats", {})
         self._daily_trade_count = ds.get("trades_today", 0)

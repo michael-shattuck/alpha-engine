@@ -89,10 +89,50 @@ class TradeStore:
             cur.execute("SELECT * FROM trades WHERE status = 'active' ORDER BY opened_at DESC")
             rows = cur.fetchall()
             conn.close()
-            return [dict(r) for r in rows]
+            trades = []
+            for r in rows:
+                meta = json.loads(r.get("metadata", "{}")) if isinstance(r.get("metadata"), str) else (r.get("metadata") or {})
+                trades.append({
+                    "id": r["id"],
+                    "direction": r["direction"],
+                    "trade_type": r.get("trade_type", ""),
+                    "asset": r.get("asset", "SOL"),
+                    "entry_price": r["entry_price"],
+                    "current_price": r.get("exit_price") or r["entry_price"],
+                    "stop_loss": r.get("stop_loss", 0),
+                    "take_profit": r.get("take_profit", 0),
+                    "size_usd": r.get("size_usd", 0),
+                    "leverage": r.get("leverage", 3.0),
+                    "collateral_usd": r.get("collateral_usd", 0),
+                    "pnl_usd": r.get("pnl_usd", 0),
+                    "pnl_pct": r.get("pnl_pct", 0),
+                    "peak_price": meta.get("peak_price", r["entry_price"]),
+                    "regime_at_entry": r.get("regime", ""),
+                    "signal_confidence": r.get("signal_confidence", 0),
+                    "opened_at": r["opened_at"].timestamp() if r.get("opened_at") else time.time(),
+                    "last_update": time.time(),
+                    "status": "active",
+                })
+            return trades
         except Exception as e:
             log.error(f"Active trade fetch failed: {e}")
             return []
+
+    @staticmethod
+    def close_all_active():
+        try:
+            conn = _conn()
+            cur = conn.cursor()
+            cur.execute("UPDATE trades SET status = 'closed', exit_reason = 'system_restart' WHERE status = 'active'")
+            count = cur.rowcount
+            conn.commit()
+            conn.close()
+            if count > 0:
+                log.info(f"Closed {count} stale active trades in DB")
+            return count
+        except Exception as e:
+            log.error(f"Close all active failed: {e}")
+            return 0
 
 
 class SignalStore:
