@@ -295,101 +295,36 @@ class SignalEngine:
     def _mean_reversion_signal(self, price: float, regime: MarketRegime, assessment,
                                last_candle_green: bool = True, last_candle_red: bool = True) -> TradeSignal:
         aggressive = regime == MarketRegime.VOLATILE_RANGING
-        tf = Timeframe.M5
-        closes = self.candles.get_closes(tf, 30)
-        if len(closes) < 20:
-            return self._no_signal(price, "insufficient_data")
-
-        rsi_val = ind.rsi(closes)
-        rsi_prev = ind.rsi(closes[:-1]) if len(closes) > 15 else rsi_val
-        velocity = ind.price_velocity(closes, 3)
-        bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes)
-        vwap_val = ind.vwap_from_candles(self.candles.get_candles(tf, 30))
-
-        rsi_os = self.RSI_OVERSOLD_AGGRESSIVE if aggressive else self.RSI_OVERSOLD
-        rsi_ob = self.RSI_OVERBOUGHT_AGGRESSIVE if aggressive else self.RSI_OVERBOUGHT
         tp = self.AMR_TP_PCT if aggressive else self.MR_TP_PCT
         sl = self.AMR_SL_PCT if aggressive else self.MR_SL_PCT
 
-        rsi_turning_up = rsi_val > rsi_prev
-        rsi_turning_down = rsi_val < rsi_prev
+        score = self._score_entry(price, last_candle_green, last_candle_red)
+        if not score:
+            return self._no_signal(price, "no_scoring_data")
 
-        rsi_long = rsi_val < rsi_os and rsi_turning_up
-        rsi_short = rsi_val > rsi_ob and rsi_turning_down
-        bb_long = bb_lower > 0 and price < bb_lower * (1 + self.BB_ENTRY_THRESHOLD) and velocity > -0.3
-        bb_short = bb_upper > 0 and price > bb_upper * (1 - self.BB_ENTRY_THRESHOLD) and velocity < 0.3
+        direction = score["direction"]
+        if not direction:
+            return self._no_signal(price, f"no_signal (long={score['long_score']:.0f} short={score['short_score']:.0f} need 5)")
 
-        direction = None
-        confidence = 0.0
-        reasons = []
-
-        if rsi_long and bb_long:
-            direction = "long"
-            confidence = 0.9
-            reasons = [f"RSI={rsi_val:.1f}<{rsi_os}", f"price near lower BB"]
-        elif rsi_short and bb_short:
-            direction = "short"
-            confidence = 0.9
-            reasons = [f"RSI={rsi_val:.1f}>{rsi_ob}", f"price near upper BB"]
-        elif rsi_long:
-            direction = "long"
-            confidence = 0.70
-            reasons = [f"RSI={rsi_val:.1f}<{rsi_os}"]
-        elif rsi_short:
-            direction = "short"
-            confidence = 0.70
-            reasons = [f"RSI={rsi_val:.1f}>{rsi_ob}"]
-        elif bb_long:
-            direction = "long"
-            confidence = 0.6
-            reasons = [f"price near lower BB (${bb_lower:.2f})"]
-        elif bb_short:
-            direction = "short"
-            confidence = 0.6
-            reasons = [f"price near upper BB (${bb_upper:.2f})"]
-
-        if direction is None:
-            return self._no_signal(price, "no_mr_signal")
-
-        if direction == "long" and rsi_val > 60:
-            return self._no_signal(price, f"mr_long_blocked_rsi_too_high ({rsi_val:.1f})")
-        if direction == "short" and rsi_val < 40:
-            return self._no_signal(price, f"mr_short_blocked_rsi_too_low ({rsi_val:.1f})")
-
-        if direction == "long" and not last_candle_green:
-            return self._no_signal(price, f"mr_long_waiting_for_green_candle (RSI={rsi_val:.1f})")
-        if direction == "short" and not last_candle_red:
-            return self._no_signal(price, f"mr_short_waiting_for_red_candle (RSI={rsi_val:.1f})")
-
-        if vwap_val > 0:
-            vwap_dist = abs(price - vwap_val) / vwap_val
-            if vwap_dist > 0.005:
-                vwap_supports = (direction == "long" and price < vwap_val) or \
-                                (direction == "short" and price > vwap_val)
-                if vwap_supports:
-                    confidence = min(confidence + 0.1, 0.95)
-                    reasons.append("VWAP confirms")
-
-        confidence *= assessment.confidence
-
+        confidence = min(score["score"] / 8, 0.95) * assessment.confidence
         if confidence < self.MIN_CONFIDENCE:
-            return self._no_signal(price, f"confidence_too_low_{confidence:.2f}")
+            return self._no_signal(price, f"score={score['score']:.0f}/8 conf={confidence:.2f} {score['reasons']}")
 
         if direction == "long":
             return TradeSignal(
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
                 entry_price=price, stop_loss=price * (1 - sl), take_profit=price * (1 + tp),
                 regime=regime.value, trade_type="mean_reversion",
-                reason=", ".join(reasons), timestamp=time.time(),
-                indicators=self._snapshot(rsi_val, bb_lower, bb_middle, bb_upper, vwap_val),
+                reason=score["reasons"], timestamp=time.time(),
+                indicators=score["indicators"],
             )
         else:
             return TradeSignal(
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
                 entry_price=price, stop_loss=price * (1 + sl), take_profit=price * (1 - tp),
                 regime=regime.value, trade_type="mean_reversion",
-                reason=", ".join(reasons), timestamp=time.time(),
-                indicators=self._snapshot(rsi_val, bb_lower, bb_middle, bb_upper, vwap_val),
+                reason=score["reasons"], timestamp=time.time(),
+                indicators=score["indicators"],
             )
 
     def _momentum_signal(self, price: float, direction: str, assessment) -> TradeSignal:
