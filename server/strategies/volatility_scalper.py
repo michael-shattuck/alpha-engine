@@ -272,7 +272,9 @@ class VolatilityScalper(BaseStrategy):
         log.info(f"Best signal: {signal.asset} {signal.type.value} conf={signal.confidence:.2f} reason={signal.reason[:40]}")
 
         size = self._calculate_position_size(signal)
+        log.info(f"Position size: ${size:.2f} (min: ${self.MIN_TRADE_USD})")
         if size < self.MIN_TRADE_USD:
+            log.warning(f"Position too small: ${size:.2f} < ${self.MIN_TRADE_USD}")
             return {"action": "wait", "reason": "position_too_small"}
 
         action = "open_long" if signal.type == SignalType.LONG else "open_short"
