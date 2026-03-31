@@ -13,7 +13,7 @@ from server.persistence import TradeStore, SignalStore
 
 log = logging.getLogger("volatility_scalper")
 
-TRACKED_ASSETS = ["SOL", "JUP", "JTO", "PYTH", "W"]
+TRACKED_ASSETS = ["SOL", "JUP", "JTO", "PYTH", "W", "SUI", "SEI"]
 
 
 class VolatilityScalper(BaseStrategy):
@@ -100,6 +100,8 @@ class VolatilityScalper(BaseStrategy):
         "JTO": "0xb43660a5f790c69354b0729a5ef9d50d68f1df92107540210b9cccba1f947cc2",
         "PYTH": "0x0bbf28e9a841a1cc788f6a361b17ca072d0ea3098a1e5df1c3922d06719579ff",
         "W": "0xeff7446475e218517566ea99e72a4abec2e1bd8498b43b7d8331e29dcb059389",
+        "SUI": "0x23d7315113f5b1d3ba7a83604c44b94d79f4fd69af77f804fc7f920a6dc65744",
+        "SEI": "0x53614f1cb0c031d4af66c04cb9c756234adad0e1cee85303795091499a4084eb",
     }
 
     async def _fetch_asset_prices(self):
