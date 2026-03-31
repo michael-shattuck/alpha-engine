@@ -14,7 +14,7 @@ from server.persistence import TradeStore, SignalStore
 
 log = logging.getLogger("volatility_scalper")
 
-TRACKED_ASSETS = ["SOL", "JUP", "JTO", "PYTH", "W", "SUI", "SEI"]
+TRACKED_ASSETS = ["SOL", "JUP", "JTO", "PYTH", "SUI", "SEI"]
 
 
 class VolatilityScalper(BaseStrategy):
