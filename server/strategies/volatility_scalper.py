@@ -20,18 +20,18 @@ class VolatilityScalper(BaseStrategy):
     STRATEGY_ID = "volatility_scalper"
     STRATEGY_NAME = "Volatility Scalper"
 
-    MAX_CONCURRENT_POSITIONS = 3
-    MAX_TRADES_PER_DAY = 30
+    MAX_CONCURRENT_POSITIONS = 7
+    MAX_TRADES_PER_DAY = 100
     MAX_LEVERAGE = 3.0
     MIN_TRADE_USD = 10.0
-    POSITION_SIZE_PCT = 0.25
+    POSITION_SIZE_PCT = 0.14
     COOLDOWN_AFTER_LOSS_SEC = 120
     COOLDOWN_AFTER_WIN_SEC = 30
     DAILY_LOSS_LIMIT_PCT = 5.0
 
     def __init__(self, mode: str = "paper"):
         super().__init__(mode=mode)
-        self.engines: dict[str, SignalEngine] = {asset: SignalEngine() for asset in TRACKED_ASSETS}
+        self.engines: dict[str, SignalEngine] = {asset: SignalEngine(asset=asset) for asset in TRACKED_ASSETS}
         self.signal_engine = self.engines["SOL"]
         self.orca: OrcaExecutor | None = None
         self.lender: MarginFiLender | None = None

@@ -62,7 +62,8 @@ class SignalEngine:
     COOLDOWN_AFTER_CLOSE = 60
     COOLDOWN_AFTER_LOSS = 120
 
-    def __init__(self):
+    def __init__(self, asset: str = "SOL"):
+        self.asset = asset
         self.candles = CandleAggregator()
         self.regime_detector = RegimeDetector()
         self._last_close_time: float = 0
@@ -184,7 +185,7 @@ class SignalEngine:
             confidence = 0.85 + (self.EXTREME_RSI_LONG - rsi_val) / 50
             confidence = min(confidence, 0.95)
             return TradeSignal(
-                type=SignalType.LONG, asset="SOL", confidence=confidence,
+                type=SignalType.LONG, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 - self.AMR_SL_PCT),
                 take_profit=price * (1 + self.AMR_TP_PCT),
@@ -197,7 +198,7 @@ class SignalEngine:
             confidence = 0.85 + (rsi_val - self.EXTREME_RSI_SHORT) / 50
             confidence = min(confidence, 0.95)
             return TradeSignal(
-                type=SignalType.SHORT, asset="SOL", confidence=confidence,
+                type=SignalType.SHORT, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 + self.AMR_SL_PCT),
                 take_profit=price * (1 - self.AMR_TP_PCT),
@@ -276,7 +277,7 @@ class SignalEngine:
 
         if direction == "long":
             return TradeSignal(
-                type=SignalType.LONG, asset="SOL", confidence=confidence,
+                type=SignalType.LONG, asset=self.asset, confidence=confidence,
                 entry_price=price, stop_loss=price * (1 - sl), take_profit=price * (1 + tp),
                 regime=regime.value, trade_type="mean_reversion",
                 reason=", ".join(reasons), timestamp=time.time(),
@@ -284,7 +285,7 @@ class SignalEngine:
             )
         else:
             return TradeSignal(
-                type=SignalType.SHORT, asset="SOL", confidence=confidence,
+                type=SignalType.SHORT, asset=self.asset, confidence=confidence,
                 entry_price=price, stop_loss=price * (1 + sl), take_profit=price * (1 - tp),
                 regime=regime.value, trade_type="mean_reversion",
                 reason=", ".join(reasons), timestamp=time.time(),
@@ -349,7 +350,7 @@ class SignalEngine:
             if ema_21 > 0:
                 sl_price = max(sl_price, ema_21 * 0.995)
             return TradeSignal(
-                type=signal, asset="SOL", confidence=confidence,
+                type=signal, asset=self.asset, confidence=confidence,
                 entry_price=price, stop_loss=sl_price, take_profit=price * (1 + self.MOM_TP_PCT),
                 regime=assessment.regime.value, trade_type="momentum",
                 reason=", ".join(reasons), timestamp=time.time(),
@@ -360,7 +361,7 @@ class SignalEngine:
             if ema_21 > 0:
                 sl_price = min(sl_price, ema_21 * 1.005)
             return TradeSignal(
-                type=signal, asset="SOL", confidence=confidence,
+                type=signal, asset=self.asset, confidence=confidence,
                 entry_price=price, stop_loss=sl_price, take_profit=price * (1 - self.MOM_TP_PCT),
                 regime=assessment.regime.value, trade_type="momentum",
                 reason=", ".join(reasons), timestamp=time.time(),
@@ -518,7 +519,7 @@ class SignalEngine:
 
     def _no_signal(self, price: float, reason: str = "") -> TradeSignal:
         return TradeSignal(
-            type=SignalType.NO_SIGNAL, asset="SOL", confidence=0,
+            type=SignalType.NO_SIGNAL, asset=self.asset, confidence=0,
             entry_price=price, stop_loss=0, take_profit=0,
             regime=self.regime_detector.regime.value, trade_type="",
             reason=reason, timestamp=time.time(),
@@ -526,7 +527,7 @@ class SignalEngine:
 
     def _exit_signal(self, price: float, signal_type: SignalType, reason: str) -> TradeSignal:
         return TradeSignal(
-            type=signal_type, asset="SOL", confidence=1.0,
+            type=signal_type, asset=self.asset, confidence=1.0,
             entry_price=price, stop_loss=0, take_profit=0,
             regime=self.regime_detector.regime.value, trade_type="exit",
             reason=reason, timestamp=time.time(),
