@@ -174,7 +174,7 @@ class MarginFiLender:
 
         deposit_ixs = [set_compute_unit_limit(600_000), set_compute_unit_price(100_000)]
         deposit_ixs.append(self._accrue_ix(SOL_BANK))
-        deposit_ixs.append(self._accrue_ix(USDC_BANK))
+        # USDC bank accrue removed - Switchboard oracle stale (6049)
 
         ata_resp = await self.rpc.get_account_info(wsol_ata)
         if not ata_resp.value:
@@ -261,7 +261,7 @@ class MarginFiLender:
             set_compute_unit_limit(800_000),
             set_compute_unit_price(100_000),
             self._accrue_ix(SOL_BANK),
-            self._accrue_ix(USDC_BANK),
+            # USDC bank accrue removed - Switchboard oracle stale (6049)
         ]
 
         ixs.append(Instruction(
@@ -338,7 +338,6 @@ class MarginFiLender:
 
         deposit_ixs = [set_compute_unit_limit(600_000), set_compute_unit_price(100_000)]
         deposit_ixs.append(self._accrue_ix(SOL_BANK))
-        deposit_ixs.append(self._accrue_ix(USDC_BANK))
 
         deposit_ixs.append(Instruction(
             program_id=MARGINFI_PROGRAM,
@@ -413,7 +412,7 @@ class MarginFiLender:
             set_compute_unit_limit(800_000),
             set_compute_unit_price(100_000),
             self._accrue_ix(SOL_BANK),
-            self._accrue_ix(USDC_BANK),
+            # USDC bank accrue removed - Switchboard oracle stale (6049)
         ]
 
         ata_resp = await self.rpc.get_account_info(wsol_ata)
