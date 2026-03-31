@@ -96,8 +96,7 @@ class DriftExecutor:
         except Exception:
             oracle_price = size_usd / 0.1
 
-        notional_usd = size_usd * leverage
-        base_tokens = notional_usd / oracle_price
+        base_tokens = size_usd / oracle_price
         base_amount = int(base_tokens * 1e9)
 
         order_params = OrderParams(
@@ -109,7 +108,7 @@ class DriftExecutor:
         )
 
         sig = await self.client.place_perp_order(order_params)
-        log.info(f"Drift {direction} {market}-PERP: ${notional_usd:.2f} notional ({base_tokens:.4f} {market}) at {leverage}x, sig={sig}")
+        log.info(f"Drift {direction} {market}-PERP: ${size_usd:.2f} notional ({base_tokens:.4f} {market}), sig={sig}")
 
         return {
             "status": "confirmed",

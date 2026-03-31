@@ -367,12 +367,16 @@ async def get_portfolio():
             for i in range(len(user.get_user_account().perp_positions)):
                 pos = user.get_user_account().perp_positions[i]
                 if pos.base_asset_amount != 0:
+                    base = abs(pos.base_asset_amount) / 1e9
+                    entry_notional = abs(pos.quote_entry_amount) / 1e6
+                    entry_price = entry_notional / base if base > 0 else 0
                     drift_positions.append({
                         "market_index": pos.market_index,
                         "direction": "long" if pos.base_asset_amount > 0 else "short",
-                        "size": abs(pos.base_asset_amount) / 1e9,
-                        "quote_entry": pos.quote_entry_amount / 1e6,
-                        "pnl": pos.quote_asset_amount / 1e6,
+                        "size_tokens": base,
+                        "entry_price": entry_price,
+                        "notional": entry_notional,
+                        "pnl": (pos.quote_asset_amount + pos.quote_entry_amount) / 1e6,
                     })
         await dc.unsubscribe()
         await conn.close()
