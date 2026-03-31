@@ -177,12 +177,14 @@ class VolatilityScalper(BaseStrategy):
 
             trade["current_price"] = price
             if trade["direction"] == "long":
-                pnl_pct = (price - trade["entry_price"]) / trade["entry_price"] * trade["leverage"]
+                raw_pnl = (price - trade["entry_price"]) / trade["entry_price"] * trade["leverage"]
                 trade["peak_price"] = max(trade.get("peak_price", trade["entry_price"]), price)
             else:
-                pnl_pct = (trade["entry_price"] - price) / trade["entry_price"] * trade["leverage"]
+                raw_pnl = (trade["entry_price"] - price) / trade["entry_price"] * trade["leverage"]
                 trade["peak_price"] = min(trade.get("peak_price", trade["entry_price"]), price)
 
+            fee_pct = 0.001 * trade["leverage"]
+            pnl_pct = raw_pnl - fee_pct
             trade["pnl_pct"] = pnl_pct * 100
             trade["pnl_usd"] = trade["collateral_usd"] * pnl_pct
             trade["last_update"] = now
