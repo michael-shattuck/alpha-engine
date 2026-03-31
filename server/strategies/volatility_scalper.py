@@ -405,6 +405,8 @@ class VolatilityScalper(BaseStrategy):
         else:
             pnl_pct = (trade["entry_price"] - exit_price) / trade["entry_price"] * trade["leverage"]
 
+        fee_pct = 0.001 * trade["leverage"]
+        pnl_pct -= fee_pct
         pnl_usd = trade["collateral_usd"] * pnl_pct
         trade["pnl_usd"] = pnl_usd
         trade["pnl_pct"] = pnl_pct * 100

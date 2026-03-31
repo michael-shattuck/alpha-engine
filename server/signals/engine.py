@@ -183,6 +183,8 @@ class SignalEngine:
         if regime == MarketRegime.TRENDING_DOWN:
             if rsi_now <= self.EXTREME_RSI_LONG and rsi_prev < rsi_now and last_candle_green:
                 return self._confirmed_reversal(price, "long", rsi_now, assessment)
+            if rsi_now < 40:
+                return self._no_signal(price, f"trend_short_blocked_rsi_already_oversold ({rsi_now:.1f})")
             if last_candle_red:
                 return self._trend_signal(price, "short", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
             return self._no_signal(price, "trending_down_waiting_for_red_candle")
@@ -190,6 +192,8 @@ class SignalEngine:
         if regime == MarketRegime.TRENDING_UP:
             if rsi_now >= self.EXTREME_RSI_SHORT and rsi_prev > rsi_now and last_candle_red:
                 return self._confirmed_reversal(price, "short", rsi_now, assessment)
+            if rsi_now > 60:
+                return self._no_signal(price, f"trend_long_blocked_rsi_already_overbought ({rsi_now:.1f})")
             if last_candle_green:
                 return self._trend_signal(price, "long", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
             return self._no_signal(price, "trending_up_waiting_for_green_candle")
@@ -346,6 +350,11 @@ class SignalEngine:
 
         if direction is None:
             return self._no_signal(price, "no_mr_signal")
+
+        if direction == "long" and rsi_val > 60:
+            return self._no_signal(price, f"mr_long_blocked_rsi_too_high ({rsi_val:.1f})")
+        if direction == "short" and rsi_val < 40:
+            return self._no_signal(price, f"mr_short_blocked_rsi_too_low ({rsi_val:.1f})")
 
         if direction == "long" and not last_candle_green:
             return self._no_signal(price, f"mr_long_waiting_for_green_candle (RSI={rsi_val:.1f})")
