@@ -28,6 +28,12 @@ export default function ScalperPage() {
   const activeTrades = sc?.active_trades ?? []
   const unrealizedPnl = activeTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0)
   const totalPnl = ds.daily_pnl_usd + unrealizedPnl
+  const capital = strategy.capital_allocated || 1
+  const uptimeHours = d.uptime_hours || 0.01
+  const hourlyReturn = totalPnl / capital / Math.max(uptimeHours, 0.01)
+  const projDpy = hourlyReturn * 24 * 100
+  const projMpy = hourlyReturn * 730 * 100
+  const projApy = hourlyReturn * 8760 * 100
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -44,7 +50,7 @@ export default function ScalperPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5 mb-4">
+          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 mb-4">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-600">Total PnL</div>
               <div className={`font-mono text-lg font-bold ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -55,29 +61,45 @@ export default function ScalperPage() {
               </div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-600">Active</div>
-              <div className="font-mono text-lg font-bold text-blue-400" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {activeTrades.length}
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Active / Done</div>
+              <div className="font-mono text-sm text-white" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                <span className="text-blue-400">{activeTrades.length} open</span> / {ds.trades_today} closed
               </div>
               <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                of 7 assets
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-600">Completed</div>
-              <div className="font-mono text-sm text-gray-300" style={{ fontVariantNumeric: 'tabular-nums' }}>{ds.trades_today}</div>
-              <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>{ds.wins}W / {ds.losses}L</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-600">Win Rate</div>
-              <div className={`font-mono text-sm font-bold ${ds.win_rate >= 0.8 ? 'text-green-400' : ds.win_rate >= 0.6 ? 'text-yellow-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {ds.trades_today > 0 ? `${(ds.win_rate * 100).toFixed(0)}%` : '--'}
+                {ds.trades_today > 0 ? `${ds.wins}W/${ds.losses}L (${(ds.win_rate * 100).toFixed(0)}%)` : 'no closes yet'}
               </div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-600">Regime</div>
               <div className={`text-sm font-semibold ${REGIME_COLORS[regime] ?? 'text-gray-500'}`}>
                 {REGIME_LABELS[regime] ?? regime}
+              </div>
+              <div className="text-[10px] text-gray-600">{((sc?.regime_confidence ?? 0) * 100).toFixed(0)}% conf</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Capital</div>
+              <div className="font-mono text-sm text-white" style={{ fontVariantNumeric: 'tabular-nums' }}>${capital.toFixed(0)}</div>
+              <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>3x leverage</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 mb-4 rounded border border-gray-800 bg-gray-950/50 p-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Projected Daily</div>
+              <div className={`font-mono text-sm font-bold ${projDpy >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {projDpy >= 0 ? '+' : ''}{projDpy.toFixed(2)}%
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Projected Monthly</div>
+              <div className={`font-mono text-sm font-bold ${projMpy >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {projMpy >= 0 ? '+' : ''}{projMpy.toFixed(1)}%
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Projected Annual</div>
+              <div className={`font-mono text-sm font-bold ${projApy >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {projApy >= 0 ? '+' : ''}{projApy.toFixed(0)}%
               </div>
             </div>
           </div>
