@@ -164,48 +164,115 @@ class SignalEngine:
             return self._no_signal(price, "cooldown")
 
         closes_5m = self.candles.get_closes(Timeframe.M5, 30)
-        rsi_now = ind.rsi(closes_5m) if len(closes_5m) >= 15 else 50
+        if len(closes_5m) < 15:
+            return self._no_signal(price, "insufficient_5m_data")
+        rsi_now = ind.rsi(closes_5m)
+        rsi_prev = ind.rsi(closes_5m[:-1]) if len(closes_5m) > 15 else rsi_now
+        velocity = ind.price_velocity(closes_5m, 3)
+        bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes_5m)
 
-        if rsi_now <= self.EXTREME_RSI_LONG or rsi_now >= self.EXTREME_RSI_SHORT:
-            return self._extreme_signal(price, rsi_now, assessment)
+        if regime == MarketRegime.TRENDING_DOWN:
+            if rsi_now <= self.EXTREME_RSI_LONG and rsi_prev < rsi_now and velocity > -0.1:
+                return self._confirmed_reversal(price, "long", rsi_now, assessment)
+            return self._trend_signal(price, "short", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
+
+        if regime == MarketRegime.TRENDING_UP:
+            if rsi_now >= self.EXTREME_RSI_SHORT and rsi_prev > rsi_now and velocity < 0.1:
+                return self._confirmed_reversal(price, "short", rsi_now, assessment)
+            return self._trend_signal(price, "long", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
 
         if regime in (MarketRegime.RANGING, MarketRegime.VOLATILE_RANGING):
             return self._mean_reversion_signal(price, regime, assessment)
 
-        if regime == MarketRegime.TRENDING_UP:
-            return self._momentum_signal(price, "long", assessment)
-
-        if regime == MarketRegime.TRENDING_DOWN:
-            return self._momentum_signal(price, "short", assessment)
-
         return self._no_signal(price)
 
-    def _extreme_signal(self, price: float, rsi_val: float, assessment) -> TradeSignal:
-        if rsi_val <= self.EXTREME_RSI_LONG:
-            confidence = 0.85 + (self.EXTREME_RSI_LONG - rsi_val) / 50
-            confidence = min(confidence, 0.95)
+    def _confirmed_reversal(self, price: float, direction: str, rsi_val: float, assessment) -> TradeSignal:
+        confidence = 0.80
+        if direction == "long":
             return TradeSignal(
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 - self.AMR_SL_PCT),
                 take_profit=price * (1 + self.AMR_TP_PCT),
-                regime=assessment.regime.value, trade_type="extreme_reversal",
-                reason=f"EXTREME oversold RSI={rsi_val:.1f} (counter-trend override)",
+                regime=assessment.regime.value, trade_type="confirmed_reversal",
+                reason=f"RSI={rsi_val:.1f} turning up from extreme (counter-trend)",
                 timestamp=time.time(),
                 indicators={"rsi_5m": rsi_val},
             )
         else:
-            confidence = 0.85 + (rsi_val - self.EXTREME_RSI_SHORT) / 50
-            confidence = min(confidence, 0.95)
             return TradeSignal(
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 + self.AMR_SL_PCT),
                 take_profit=price * (1 - self.AMR_TP_PCT),
-                regime=assessment.regime.value, trade_type="extreme_reversal",
-                reason=f"EXTREME overbought RSI={rsi_val:.1f} (counter-trend override)",
+                regime=assessment.regime.value, trade_type="confirmed_reversal",
+                reason=f"RSI={rsi_val:.1f} turning down from extreme (counter-trend)",
                 timestamp=time.time(),
                 indicators={"rsi_5m": rsi_val},
+            )
+
+    def _trend_signal(self, price: float, direction: str, rsi_val: float, velocity: float,
+                      bb_lower: float, bb_middle: float, bb_upper: float, assessment) -> TradeSignal:
+        confidence = 0.0
+        reasons = []
+
+        if direction == "short":
+            if velocity < -0.2:
+                confidence += 0.35
+                reasons.append(f"vel={velocity:.2f}%")
+            if rsi_val > 45 and rsi_val < 65:
+                confidence += 0.20
+                reasons.append(f"RSI={rsi_val:.1f} mid-range (room to fall)")
+            elif rsi_val >= 65:
+                confidence += 0.30
+                reasons.append(f"RSI={rsi_val:.1f} overbought in downtrend")
+            if bb_upper > 0 and price > bb_middle:
+                confidence += 0.15
+                reasons.append("above BB middle")
+            if assessment.adx > 25:
+                confidence += 0.10
+                reasons.append(f"strong trend ADX={assessment.adx:.0f}")
+        else:
+            if velocity > 0.2:
+                confidence += 0.35
+                reasons.append(f"vel={velocity:.2f}%")
+            if rsi_val < 55 and rsi_val > 35:
+                confidence += 0.20
+                reasons.append(f"RSI={rsi_val:.1f} mid-range (room to rise)")
+            elif rsi_val <= 35:
+                confidence += 0.30
+                reasons.append(f"RSI={rsi_val:.1f} oversold in uptrend")
+            if bb_lower > 0 and price < bb_middle:
+                confidence += 0.15
+                reasons.append("below BB middle")
+            if assessment.adx > 25:
+                confidence += 0.10
+                reasons.append(f"strong trend ADX={assessment.adx:.0f}")
+
+        confidence *= assessment.confidence
+
+        if confidence < self.MIN_CONFIDENCE:
+            return self._no_signal(price, f"trend_{direction}_weak_{confidence:.2f}")
+
+        if direction == "short":
+            return TradeSignal(
+                type=SignalType.SHORT, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 + self.MOM_SL_PCT),
+                take_profit=price * (1 - self.MOM_TP_PCT),
+                regime=assessment.regime.value, trade_type="trend_follow",
+                reason=", ".join(reasons), timestamp=time.time(),
+                indicators={"rsi_5m": rsi_val, "velocity": velocity},
+            )
+        else:
+            return TradeSignal(
+                type=SignalType.LONG, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 - self.MOM_SL_PCT),
+                take_profit=price * (1 + self.MOM_TP_PCT),
+                regime=assessment.regime.value, trade_type="trend_follow",
+                reason=", ".join(reasons), timestamp=time.time(),
+                indicators={"rsi_5m": rsi_val, "velocity": velocity},
             )
 
     def _mean_reversion_signal(self, price: float, regime: MarketRegime, assessment) -> TradeSignal:
@@ -216,6 +283,8 @@ class SignalEngine:
             return self._no_signal(price, "insufficient_data")
 
         rsi_val = ind.rsi(closes)
+        rsi_prev = ind.rsi(closes[:-1]) if len(closes) > 15 else rsi_val
+        velocity = ind.price_velocity(closes, 3)
         bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes)
         vwap_val = ind.vwap_from_candles(self.candles.get_candles(tf, 30))
 
@@ -224,10 +293,13 @@ class SignalEngine:
         tp = self.AMR_TP_PCT if aggressive else self.MR_TP_PCT
         sl = self.AMR_SL_PCT if aggressive else self.MR_SL_PCT
 
-        rsi_long = rsi_val < rsi_os
-        rsi_short = rsi_val > rsi_ob
-        bb_long = bb_lower > 0 and price < bb_lower * (1 + self.BB_ENTRY_THRESHOLD)
-        bb_short = bb_upper > 0 and price > bb_upper * (1 - self.BB_ENTRY_THRESHOLD)
+        rsi_turning_up = rsi_val > rsi_prev
+        rsi_turning_down = rsi_val < rsi_prev
+
+        rsi_long = rsi_val < rsi_os and rsi_turning_up
+        rsi_short = rsi_val > rsi_ob and rsi_turning_down
+        bb_long = bb_lower > 0 and price < bb_lower * (1 + self.BB_ENTRY_THRESHOLD) and velocity > -0.3
+        bb_short = bb_upper > 0 and price > bb_upper * (1 - self.BB_ENTRY_THRESHOLD) and velocity < 0.3
 
         direction = None
         confidence = 0.0
