@@ -18,7 +18,7 @@ from driftpy.accounts import get_perp_market_account
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.keypair import load_keypair
 
-from server.config import SOLANA_RPC_URL, WALLET_PRIVATE_KEY
+from server.config import SOLANA_RPC_URL, WALLET_PRIVATE_KEY, HELIUS_RPC_URL
 
 log = logging.getLogger("drift")
 
@@ -52,7 +52,7 @@ class DriftExecutor:
             log.info("Drift executor started (paper mode)")
             return
 
-        connection = AsyncClient(SOLANA_RPC_URL, commitment=Confirmed)
+        connection = AsyncClient(HELIUS_RPC_URL or SOLANA_RPC_URL, commitment=Confirmed)
         keypair = Keypair.from_bytes(base58.b58decode(WALLET_PRIVATE_KEY))
 
         self.client = DriftClient(
@@ -90,7 +90,15 @@ class DriftExecutor:
             log.info(f"Paper Drift {direction} {market}-PERP: ${size_usd:.2f} at {leverage}x")
             return {"status": "simulated", "market": market, "direction": direction}
 
-        base_amount = int(size_usd * leverage * 1e9)
+        try:
+            oracle_price_data = self.client.get_oracle_price_data_for_perp_market(market_index)
+            oracle_price = oracle_price_data.price / 1e6
+        except Exception:
+            oracle_price = size_usd / 0.1
+
+        notional_usd = size_usd * leverage
+        base_tokens = notional_usd / oracle_price
+        base_amount = int(base_tokens * 1e9)
 
         order_params = OrderParams(
             order_type=OrderType.Market(),
@@ -101,7 +109,7 @@ class DriftExecutor:
         )
 
         sig = await self.client.place_perp_order(order_params)
-        log.info(f"Drift {direction} {market}-PERP: ${size_usd:.2f} at {leverage}x, sig={sig}")
+        log.info(f"Drift {direction} {market}-PERP: ${notional_usd:.2f} notional ({base_tokens:.4f} {market}) at {leverage}x, sig={sig}")
 
         return {
             "status": "confirmed",

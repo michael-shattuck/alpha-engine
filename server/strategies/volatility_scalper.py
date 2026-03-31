@@ -8,7 +8,8 @@ from server.signals.engine import SignalEngine, SignalType, TradeSignal
 from server.signals.regime import MarketRegime
 from server.execution.orca import OrcaExecutor
 from server.execution.marginfi import MarginFiLender
-from server.config import ORCA_WHIRLPOOL_SOL_USDC, DATABASE_URL
+from server.execution.drift import DriftExecutor
+from server.config import ORCA_WHIRLPOOL_SOL_USDC, DATABASE_URL, HELIUS_RPC_URL
 from server.persistence import TradeStore, SignalStore
 
 log = logging.getLogger("volatility_scalper")
@@ -34,6 +35,7 @@ class VolatilityScalper(BaseStrategy):
         self.signal_engine = self.engines["SOL"]
         self.orca: OrcaExecutor | None = None
         self.lender: MarginFiLender | None = None
+        self.drift: DriftExecutor | None = None
         self._asset_prices: dict[str, float] = {}
         self._active_trades: list[dict] = []
         self._trade_log: list[dict] = []
@@ -45,6 +47,9 @@ class VolatilityScalper(BaseStrategy):
         self._daily_reset_time: float = 0.0
 
     async def init_executors(self):
+        if self.mode == "live" and not self.drift:
+            self.drift = DriftExecutor(paper_mode=False)
+            await self.drift.start()
         if self.mode == "live" and not self.orca:
             self.orca = OrcaExecutor(paper_mode=False)
             await self.orca.start()
@@ -355,58 +360,26 @@ class VolatilityScalper(BaseStrategy):
         return None
 
     async def _open_live_long(self, trade: dict, sol_price: float):
-        collateral_sol = trade["collateral_usd"] / sol_price
-        borrow_usdc = trade["collateral_usd"] * (trade["leverage"] - 1)
-
-        result = await self.lender.deposit_and_borrow(self.orca.keypair, collateral_sol, borrow_usdc)
-        log.info(f"Live long: deposited {collateral_sol:.4f} SOL, borrowed ${borrow_usdc:.2f} USDC: {result}")
-        trade["borrowed_amount"] = borrow_usdc
-
-        total_usdc = borrow_usdc
-        swap_atoms = int(total_usdc * 1e6)
-        swap_result = await self.orca.swap(
-            self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC, swap_atoms, a_to_b=False,
-        )
-        log.info(f"Live long swap USDC->SOL: {swap_result.get('signature')}")
+        asset = trade["asset"]
+        size_usd = trade["size_usd"]
+        result = await self.drift.open_perp_position(asset, "long", size_usd, trade["leverage"])
+        log.info(f"Drift long {asset}: ${size_usd:.2f} -> {result}")
 
     async def _open_live_short(self, trade: dict, sol_price: float):
-        collateral_usdc = trade["collateral_usd"]
-        sol_to_borrow = trade["collateral_usd"] * (trade["leverage"] - 1) / sol_price
-
-        result = await self.lender.deposit_usdc_and_borrow_sol(
-            self.orca.keypair, collateral_usdc, sol_to_borrow,
-        )
-        log.info(f"Live short: deposited ${collateral_usdc:.2f} USDC, borrowed {sol_to_borrow:.4f} SOL: {result}")
-        trade["borrowed_amount"] = sol_to_borrow
-
-        swap_lamports = int(sol_to_borrow * 1e9)
-        swap_result = await self.orca.swap(
-            self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC, swap_lamports, a_to_b=True,
-        )
-        log.info(f"Live short swap SOL->USDC: {swap_result.get('signature')}")
+        asset = trade["asset"]
+        size_usd = trade["size_usd"]
+        result = await self.drift.open_perp_position(asset, "short", size_usd, trade["leverage"])
+        log.info(f"Drift short {asset}: ${size_usd:.2f} -> {result}")
 
     async def _close_live_long(self, trade: dict, sol_price: float):
-        sol_held = trade["size_usd"] / trade["entry_price"]
-        swap_lamports = int(sol_held * 1e9)
-        swap_result = await self.orca.swap(
-            self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC, swap_lamports, a_to_b=True,
-        )
-        log.info(f"Live close long SOL->USDC: {swap_result.get('signature')}")
-
-        result = await self.lender.repay_and_withdraw(self.orca.keypair)
-        log.info(f"Live close long repay+withdraw: {result}")
+        asset = trade["asset"]
+        result = await self.drift.close_perp_position(asset)
+        log.info(f"Drift close long {asset}: {result}")
 
     async def _close_live_short(self, trade: dict, sol_price: float):
-        sol_owed = trade.get("borrowed_amount", 0)
-        usdc_needed = sol_owed * sol_price * 1.02
-        swap_atoms = int(usdc_needed * 1e6)
-        swap_result = await self.orca.swap(
-            self.orca.keypair, ORCA_WHIRLPOOL_SOL_USDC, swap_atoms, a_to_b=False,
-        )
-        log.info(f"Live close short USDC->SOL: {swap_result.get('signature')}")
-
-        result = await self.lender.repay_sol_and_withdraw_usdc(self.orca.keypair)
-        log.info(f"Live close short repay SOL+withdraw USDC: {result}")
+        asset = trade["asset"]
+        result = await self.drift.close_perp_position(asset)
+        log.info(f"Drift close short {asset}: {result}")
 
     async def _close_trade(self, trade: dict, exit_price: float, reason: str, market_data: dict):
         trade["status"] = "closing"
