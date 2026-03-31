@@ -13,8 +13,14 @@ ETHEREUM_RPC_URL = os.getenv("ETHEREUM_RPC_URL", "http://13.91.71.124:8545")
 ARBITRUM_RPC_URL = os.getenv("ARBITRUM_RPC_URL", "http://13.91.71.124:8547")
 WALLET_PRIVATE_KEY = os.getenv("WALLET_PRIVATE_KEY", "")
 
-JUPITER_API = "https://lite-api.jup.ag/swap/v1"
+HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "")
+HELIUS_RPC_URL = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}" if HELIUS_API_KEY else ""
+HELIUS_RPC_FAST = os.getenv("HELIUS_RPC_FAST", "")
+JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", "")
+JUPITER_API = f"https://api.jup.ag/swap/v1/{JUPITER_API_KEY}" if JUPITER_API_KEY else "https://lite-api.jup.ag/swap/v1"
 JUPITER_PRICE_API = "https://api.jup.ag/price/v2"
+BIRDEYE_API_KEY = os.getenv("BIRDEYE_API_KEY", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 DEFILLAMA_API = "https://yields.llama.fi"
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
@@ -35,8 +41,8 @@ FEE_COMPOUND_INTERVAL = 4 * 3600
 DEFAULT_MODE = "paper"
 
 DEFAULT_CAPITAL_ALLOCATION = {
-    "leveraged_lp": 1.0,
-    "volatile_pairs": 0.0,
+    "leveraged_lp": 0.30,
+    "volatility_scalper": 0.70,
 }
 
 RISK_LIMITS = {

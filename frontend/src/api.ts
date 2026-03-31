@@ -70,3 +70,87 @@ export function fetchWallet(): Promise<WalletInfo> {
 export function fetchAlerts(): Promise<AlertEntry[]> {
   return request<AlertEntry[]>('/api/alerts')
 }
+
+export interface LifecycleState {
+  phase: string
+  position_mint: string | null
+  borrowed_usd: number
+  equity_usd: number
+  leverage: number
+  range_pct: number
+  error: string
+  retries: number
+}
+
+export interface OptimizerState {
+  current_pool_apy: number
+  volatility: number
+  trend_1h: number
+  actual_fee_apy: number
+  return_floor: number
+  optimized: {
+    leverage: number
+    range_pct: number
+    gross_apy: number
+    net_apy: number
+    monthly: number
+    rebalance_cost: number
+    rebalances_per_day: number
+    concentration: number
+  }
+  ranked_pools: Array<{
+    pool: string
+    pool_apy: number
+    monthly: number
+    leverage: number
+    range_pct: number
+  }>
+}
+
+export function fetchLifecycle(): Promise<LifecycleState> {
+  return request<LifecycleState>('/api/lifecycle')
+}
+
+export function fetchOptimizer(): Promise<OptimizerState> {
+  return request<OptimizerState>('/api/optimizer')
+}
+
+export interface ScalperTrade {
+  id: string
+  direction: string
+  trade_type: string
+  entry_price: number
+  current_price: number
+  stop_loss: number
+  take_profit: number
+  pnl_usd: number
+  pnl_pct: number
+  leverage: number
+  regime_at_entry: string
+  signal_confidence: number
+}
+
+export interface ScalperState {
+  active_trades: ScalperTrade[]
+  daily_stats: {
+    trades_today: number
+    wins: number
+    losses: number
+    daily_pnl_usd: number
+    daily_pnl_pct: number
+    win_rate: number
+  }
+  indicators: Record<string, number | string>
+  signal_performance: {
+    total_signals: number
+    win_rate: number
+    profit_factor: number
+    by_regime: Record<string, { count: number; win_rate: number; avg_pnl: number }>
+  }
+  regime: string
+  regime_confidence: number
+}
+
+export function fetchScalper(): Promise<ScalperState> {
+  return request<ScalperState>('/api/scalper')
+}

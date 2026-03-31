@@ -25,11 +25,13 @@ from server.config import (
     WALLET_PRIVATE_KEY,
     SOL_MINT,
     USDC_MINT,
+    HELIUS_RPC_FAST,
+    HELIUS_RPC_URL,
 )
 
 log = logging.getLogger(__name__)
 
-HELIUS_RPC = "https://johnath-nf0ci1-fast-mainnet.helius-rpc.com"
+HELIUS_RPC = HELIUS_RPC_FAST or HELIUS_RPC_URL
 WHIRLPOOL_PROGRAM_ID = Pubkey.from_string(ORCA_WHIRLPOOL_PROGRAM)
 TOKEN_PROGRAM = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
 ASSOCIATED_TOKEN_PROGRAM = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
@@ -465,12 +467,30 @@ class OrcaExecutor:
         position_data = await self._fetch_position_data(mint_pubkey)
 
         tick_spacing = pool_state["tick_spacing"]
-        tick_array_lower = _derive_tick_array_pda(
-            pool_pubkey, _tick_array_start(position_data["tick_lower"], tick_spacing)
+
+        lower_array_start = _tick_array_start(position_data["tick_lower"], tick_spacing)
+        upper_array_start = _tick_array_start(position_data["tick_upper"], tick_spacing)
+
+        lower_exists, upper_exists = await asyncio.gather(
+            self._tick_array_exists(pool_pubkey, lower_array_start),
+            self._tick_array_exists(pool_pubkey, upper_array_start),
         )
-        tick_array_upper = _derive_tick_array_pda(
-            pool_pubkey, _tick_array_start(position_data["tick_upper"], tick_spacing)
-        )
+
+        if not lower_exists or not upper_exists:
+            current_tick = pool_state["tick"]
+            current_array_start = _tick_array_start(current_tick, tick_spacing)
+            ticks_per_array = tick_spacing * 88
+            log.warning(
+                f"Tick arrays missing for close (lower={lower_exists}, upper={upper_exists}). "
+                f"Using current price tick arrays instead."
+            )
+            if not lower_exists:
+                lower_array_start = current_array_start - ticks_per_array
+            if not upper_exists:
+                upper_array_start = current_array_start + ticks_per_array
+
+        tick_array_lower = _derive_tick_array_pda(pool_pubkey, lower_array_start)
+        tick_array_upper = _derive_tick_array_pda(pool_pubkey, upper_array_start)
 
         decrease_data = DISCRIMINATORS["decrease_liquidity"]
         decrease_data += struct.pack("<Q", position_data["liquidity"])

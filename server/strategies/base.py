@@ -105,10 +105,10 @@ class BaseStrategy(ABC):
 
     @property
     def current_value(self) -> float:
-        return sum(
-            p.current_value_usd + p.fees_earned_usd
-            for p in self.positions if p.status == "active"
-        )
+        active = [p for p in self.positions if p.status == "active"]
+        if not active:
+            return self.capital_allocated
+        return sum(p.current_value_usd + p.fees_earned_usd for p in active)
 
     @property
     def total_fees(self) -> float:

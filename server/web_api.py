@@ -9,12 +9,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from server.config import WEB_API_HOST, WEB_API_PORT, DEFAULT_MODE, DEFAULT_CAPITAL_ALLOCATION
+from server.config import WEB_API_HOST, WEB_API_PORT, DEFAULT_MODE, DEFAULT_CAPITAL_ALLOCATION, HELIUS_RPC_URL
 from server.orchestrator import Orchestrator
 from server.strategies.leveraged_lp import LeveragedLPStrategy
 from server.strategies.volatile_pairs import VolatilePairsStrategy
 from server.strategies.adaptive_range import AdaptiveRangeStrategy
 from server.strategies.funding_arb import FundingArbStrategy
+from server.strategies.volatility_scalper import VolatilityScalper
 from server.alerts import alerts
 
 log = logging.getLogger("api")
@@ -32,7 +33,8 @@ async def lifespan(app: FastAPI):
 
     orchestrator = Orchestrator(capital=capital, mode=mode)
     orchestrator.register_strategy(LeveragedLPStrategy(mode=mode))
-    orchestrator.register_strategy(VolatilePairsStrategy(mode=mode))
+    orchestrator.register_strategy(VolatilityScalper(mode=mode))
+    orchestrator.register_strategy(VolatilePairsStrategy(mode=mode), dormant=True)
     orchestrator.register_strategy(AdaptiveRangeStrategy(mode=mode), dormant=True)
     orchestrator.register_strategy(FundingArbStrategy(mode=mode), dormant=True)
 
@@ -229,7 +231,7 @@ async def get_wallet():
             )
             import httpx
             async with httpx.AsyncClient(timeout=10) as http:
-                r = await http.post("https://mainnet.helius-rpc.com/?api-key=92dc56e5-bd3e-402e-b30c-9c949008b793", json={
+                r = await http.post(HELIUS_RPC_URL, json={
                     "jsonrpc": "2.0", "id": 1, "method": "getTokenAccountBalance",
                     "params": [str(usdc_ata)]
                 })
@@ -247,6 +249,62 @@ async def get_wallet():
         "sol_price": orchestrator.prices.sol_price,
         "total_usd": sol_balance * orchestrator.prices.sol_price + usdc_balance,
         "marginfi": marginfi_state,
+    }
+
+
+@app.get("/api/scalper")
+async def get_scalper():
+    scalper = orchestrator.strategies.get("volatility_scalper")
+    if not scalper:
+        return {}
+    state = scalper.get_state()
+    return {
+        "active_trades": state.get("active_trades", []),
+        "daily_stats": state.get("daily_stats", {}),
+        "indicators": state.get("indicators", {}),
+        "signal_performance": state.get("signal_performance", {}),
+        "regime": state.get("metrics", {}).get("regime", "unknown"),
+        "regime_confidence": state.get("metrics", {}).get("regime_confidence", 0),
+    }
+
+
+@app.get("/api/allocator")
+async def get_allocator():
+    if not hasattr(orchestrator, "allocator") or not orchestrator.allocator:
+        return {"status": "not_configured"}
+    return orchestrator.allocator.get_state()
+
+
+@app.get("/api/lifecycle")
+async def get_lifecycle():
+    lp = orchestrator.strategies.get("leveraged_lp")
+    if lp and hasattr(lp, "lifecycle") and lp.lifecycle:
+        return lp.lifecycle.get_state()
+    return {"phase": "idle", "error": ""}
+
+
+@app.get("/api/optimizer")
+async def get_optimizer():
+    lp = orchestrator.strategies.get("leveraged_lp")
+    if not lp:
+        return {}
+    pool_apy = lp.metrics.get("pool_apy", 50.0)
+    vol = lp._volatility()
+    trend = lp._trend()
+    from server.strategies.optimizer import optimize_for_floor, rank_pools
+    opt = optimize_for_floor(pool_apy, vol, lp.base_leverage, lp.RETURN_FLOOR_MONTHLY)
+    pools = rank_pools(orchestrator.prices.pool_apys, vol, lp.base_leverage, lp.RETURN_FLOOR_MONTHLY)
+    actual_fee_apy = 0
+    if lp.fee_tracker and lp.active_positions:
+        actual_fee_apy = lp.fee_tracker.get_actual_apy(lp.active_positions[0].deposit_usd)
+    return {
+        "current_pool_apy": pool_apy,
+        "volatility": vol,
+        "trend_1h": trend,
+        "optimized": opt,
+        "actual_fee_apy": actual_fee_apy,
+        "return_floor": lp.RETURN_FLOOR_MONTHLY,
+        "ranked_pools": pools[:5],
     }
 
 

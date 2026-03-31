@@ -15,7 +15,9 @@ from server.execution.prices import PriceService
 from server.strategies.base import BaseStrategy
 from server.risk.guardian import Guardian
 from server.intelligence import AIOrchestrator as AI
+from server.strategies.allocator import DynamicAllocator
 from server.alerts import alerts
+from server.config import DATABASE_URL
 
 log = logging.getLogger("orchestrator")
 
@@ -28,6 +30,7 @@ class Orchestrator:
         self.prices = PriceService()
         self.guardian = Guardian()
         self.ai = AI()
+        self.allocator = DynamicAllocator()
         self.strategies: dict[str, BaseStrategy] = {}
         self.running = False
         self._last_price_update = 0.0
@@ -51,11 +54,20 @@ class Orchestrator:
 
         self.state.portfolio.total_capital = self.capital
         self.state.portfolio.mode = self.mode
+        self.state.portfolio.circuit_breaker_active = False
+        self.state.portfolio.started_at = time.time()
 
         self._apply_allocations(DEFAULT_CAPITAL_ALLOCATION)
 
         await self.prices.update_sol_price()
         await self.prices.update_pool_apys()
+
+        for sid, strategy in self.strategies.items():
+            if hasattr(strategy, "warmup") and self.prices.sol_price_history:
+                try:
+                    await strategy.warmup(self.prices.sol_price_history)
+                except Exception as e:
+                    log.error(f"Strategy {sid} warmup failed: {e}")
 
         if self.mode == "live":
             market_data = self.prices.get_market_data()
@@ -111,6 +123,7 @@ class Orchestrator:
 
                 if now - self._last_risk_check >= RISK_CHECK_INTERVAL:
                     await self._intelligence_cycle(market_data)
+                    self._check_dynamic_allocation()
                     self._last_risk_check = now
 
                 for sid, strategy in self.strategies.items():
@@ -134,6 +147,7 @@ class Orchestrator:
                     self._save_all_states()
                     self.state.add_snapshot(self.prices.sol_price)
                     self._record_strategy_performance(market_data)
+                    self._save_db_snapshot(market_data)
                     self._last_snapshot = now
 
                 await asyncio.sleep(ORCHESTRATOR_INTERVAL)
@@ -167,10 +181,13 @@ class Orchestrator:
             action_type = action.get("type", "")
 
             if action_type == "emergency_halt":
-                log.warning(f"EMERGENCY HALT FLAGGED (not auto-executing in live): {action.get('reason')}")
-                self.state.portfolio.circuit_breaker_active = True
-                self.state.add_event("emergency_halt_flagged", "ai", action)
-                return
+                log.warning(f"EMERGENCY HALT FLAGGED: {action.get('reason')}")
+                if self.mode == "live":
+                    self.state.portfolio.circuit_breaker_active = True
+                    self.state.add_event("emergency_halt_flagged", "ai", action)
+                    return
+                else:
+                    self.state.add_event("emergency_halt_flagged_paper", "ai", action)
 
             elif action_type == "close_position":
                 log.warning(f"RISK CLOSE FLAGGED (not auto-executing in live): {action}")
@@ -248,12 +265,53 @@ class Orchestrator:
                 pnl_pct = strategy.total_pnl_percent
                 self.ai.selector.record_performance(sid, pnl_pct, conditions)
 
+    def _save_db_snapshot(self, market_data: dict):
+        if not DATABASE_URL:
+            return
+        try:
+            from server.persistence import SnapshotStore
+            scalper = self.strategies.get("volatility_scalper")
+            regime = ""
+            volatility = 0.0
+            indicators = {}
+            if scalper and hasattr(scalper, "signal_engine"):
+                regime = scalper.signal_engine.regime_detector.regime.value
+                volatility = scalper.signal_engine.regime_detector.confidence
+                indicators = scalper.signal_engine.get_indicator_snapshot()
+            allocations = {sid: s.target_allocation for sid, s in self.strategies.items()}
+            SnapshotStore.save(
+                self.prices.sol_price, self._compute_total_equity(),
+                self._compute_total_equity() - self.capital,
+                regime, volatility, indicators, allocations,
+            )
+        except Exception as e:
+            log.debug(f"DB snapshot failed: {e}")
+
+    def _check_dynamic_allocation(self):
+        scalper = self.strategies.get("volatility_scalper")
+        if not scalper or not hasattr(scalper, "signal_engine"):
+            return
+
+        regime = scalper.signal_engine.regime_detector.regime
+        current_allocs = {
+            sid: s.target_allocation for sid, s in self.strategies.items()
+            if sid in ("leveraged_lp", "volatility_scalper")
+        }
+
+        new_allocs = self.allocator.should_rebalance(regime, current_allocs)
+        if new_allocs:
+            log.info(f"Dynamic reallocation: {current_allocs} -> {new_allocs} (regime={regime.value})")
+            self._apply_allocations(new_allocs)
+            self.state.add_event("dynamic_reallocation", "allocator", {
+                "regime": regime.value,
+                "allocations": new_allocs,
+            })
+
     def _apply_allocations(self, allocations: dict):
-        for sid, pct in allocations.items():
-            strategy = self.strategies.get(sid)
-            if strategy:
-                strategy.target_allocation = pct
-                strategy.capital_allocated = self.capital * pct
+        for sid, strategy in self.strategies.items():
+            pct = allocations.get(sid, 0)
+            strategy.target_allocation = pct
+            strategy.capital_allocated = self.capital * pct
 
     def _save_all_states(self):
         for sid, strategy in self.strategies.items():
