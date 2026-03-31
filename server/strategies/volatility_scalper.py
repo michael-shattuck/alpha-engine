@@ -269,6 +269,7 @@ class VolatilityScalper(BaseStrategy):
             return {"action": "hold", "reason": "no_signal_across_assets"}
 
         signal = best_signal
+        log.info(f"Best signal: {signal.asset} {signal.type.value} conf={signal.confidence:.2f} reason={signal.reason[:40]}")
 
         size = self._calculate_position_size(signal)
         if size < self.MIN_TRADE_USD:
