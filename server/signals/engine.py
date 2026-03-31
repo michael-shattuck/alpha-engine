@@ -167,6 +167,10 @@ class SignalEngine:
         if len(closes_5m) < 15:
             return self._no_signal(price, "insufficient_5m_data")
 
+        rsi_now = ind.rsi(closes_5m)
+        rsi_prev = ind.rsi(closes_5m[:-1]) if len(closes_5m) > 15 else rsi_now
+        velocity = ind.price_velocity(closes_5m, 3)
+
         closes_1m = self.candles.get_closes(Timeframe.M1, 5)
         candle_1m_green = len(closes_1m) >= 2 and closes_1m[-1] > closes_1m[-2]
         candle_1m_red = len(closes_1m) >= 2 and closes_1m[-1] < closes_1m[-2]
@@ -174,10 +178,6 @@ class SignalEngine:
         trend_5m_down = len(closes_5m) >= 3 and closes_5m[-1] < closes_5m[-3]
         last_candle_green = candle_1m_green or trend_5m_up or velocity > 0.05
         last_candle_red = candle_1m_red or trend_5m_down or velocity < -0.05
-
-        rsi_now = ind.rsi(closes_5m)
-        rsi_prev = ind.rsi(closes_5m[:-1]) if len(closes_5m) > 15 else rsi_now
-        velocity = ind.price_velocity(closes_5m, 3)
         bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes_5m)
 
         if regime == MarketRegime.TRENDING_DOWN:
