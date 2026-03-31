@@ -117,9 +117,9 @@ class RegimeDetector:
 
         if self._regime != regime:
             time_in_regime = now - self._regime_since
-            if time_in_regime < 7200:
-                confidence *= 0.85
-                reason += " (recent flip penalty)"
+            if time_in_regime < 3600:
+                confidence *= 0.92
+                reason += " (recent flip)"
             self._regime_since = now
 
         self._regime = regime

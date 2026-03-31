@@ -34,7 +34,10 @@ class TradeSignal:
 
 
 class SignalEngine:
-    MIN_CONFIDENCE = 0.50
+    MIN_CONFIDENCE = 0.40
+
+    EXTREME_RSI_LONG = 25
+    EXTREME_RSI_SHORT = 75
 
     RSI_OVERSOLD = 30
     RSI_OVERBOUGHT = 70
@@ -159,6 +162,12 @@ class SignalEngine:
         if now - self._last_close_time < cooldown:
             return self._no_signal(price, "cooldown")
 
+        closes_5m = self.candles.get_closes(Timeframe.M5, 30)
+        rsi_now = ind.rsi(closes_5m) if len(closes_5m) >= 15 else 50
+
+        if rsi_now <= self.EXTREME_RSI_LONG or rsi_now >= self.EXTREME_RSI_SHORT:
+            return self._extreme_signal(price, rsi_now, assessment)
+
         if regime in (MarketRegime.RANGING, MarketRegime.VOLATILE_RANGING):
             return self._mean_reversion_signal(price, regime, assessment)
 
@@ -169,6 +178,34 @@ class SignalEngine:
             return self._momentum_signal(price, "short", assessment)
 
         return self._no_signal(price)
+
+    def _extreme_signal(self, price: float, rsi_val: float, assessment) -> TradeSignal:
+        if rsi_val <= self.EXTREME_RSI_LONG:
+            confidence = 0.85 + (self.EXTREME_RSI_LONG - rsi_val) / 50
+            confidence = min(confidence, 0.95)
+            return TradeSignal(
+                type=SignalType.LONG, asset="SOL", confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 - self.AMR_SL_PCT),
+                take_profit=price * (1 + self.AMR_TP_PCT),
+                regime=assessment.regime.value, trade_type="extreme_reversal",
+                reason=f"EXTREME oversold RSI={rsi_val:.1f} (counter-trend override)",
+                timestamp=time.time(),
+                indicators={"rsi_5m": rsi_val},
+            )
+        else:
+            confidence = 0.85 + (rsi_val - self.EXTREME_RSI_SHORT) / 50
+            confidence = min(confidence, 0.95)
+            return TradeSignal(
+                type=SignalType.SHORT, asset="SOL", confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 + self.AMR_SL_PCT),
+                take_profit=price * (1 - self.AMR_TP_PCT),
+                regime=assessment.regime.value, trade_type="extreme_reversal",
+                reason=f"EXTREME overbought RSI={rsi_val:.1f} (counter-trend override)",
+                timestamp=time.time(),
+                indicators={"rsi_5m": rsi_val},
+            )
 
     def _mean_reversion_signal(self, price: float, regime: MarketRegime, assessment) -> TradeSignal:
         aggressive = regime == MarketRegime.VOLATILE_RANGING
@@ -205,11 +242,11 @@ class SignalEngine:
             reasons = [f"RSI={rsi_val:.1f}>{rsi_ob}", f"price near upper BB"]
         elif rsi_long:
             direction = "long"
-            confidence = 0.65
+            confidence = 0.70
             reasons = [f"RSI={rsi_val:.1f}<{rsi_os}"]
         elif rsi_short:
             direction = "short"
-            confidence = 0.65
+            confidence = 0.70
             reasons = [f"RSI={rsi_val:.1f}>{rsi_ob}"]
         elif bb_long:
             direction = "long"
