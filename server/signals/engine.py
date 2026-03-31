@@ -144,64 +144,103 @@ class SignalEngine:
         c = self.candles.get_current(Timeframe.M1)
         return c.close if c else 0
 
+    TREND_TP_PCT = 0.02
+    TREND_SL_PCT = 0.015
+    TREND_MAX_HOLD = 5400
+
     def evaluate(self, current_price: float = 0) -> TradeSignal:
         now = time.time()
         price = current_price or self.current_price
         if price <= 0:
             return self._no_signal(price)
 
-        if self.candles.candle_count(Timeframe.M5) < 20:
-            return self._no_signal(price, f"warmup ({self.candles.candle_count(Timeframe.M5)}/20 5m candles)")
-
-        assessment = self.regime_detector.assess(self.candles)
-        regime = assessment.regime
-
-        if regime == MarketRegime.DEAD:
-            return self._no_signal(price, "dead_market")
+        closes_15m = self.candles.get_closes(Timeframe.M15, 30)
+        if len(closes_15m) < 22:
+            closes_5m = self.candles.get_closes(Timeframe.M5, 30)
+            if len(closes_5m) < 22:
+                return self._no_signal(price, f"warmup (need 22 candles)")
+            closes = closes_5m
+            timeframe_label = "5m"
+        else:
+            closes = closes_15m
+            timeframe_label = "15m"
 
         cooldown = self.COOLDOWN_AFTER_LOSS if self._last_close_was_loss else self.COOLDOWN_AFTER_CLOSE
         if now - self._last_close_time < cooldown:
             return self._no_signal(price, "cooldown")
 
-        closes_5m = self.candles.get_closes(Timeframe.M5, 30)
-        if len(closes_5m) < 15:
-            return self._no_signal(price, "insufficient_5m_data")
+        rsi = ind.rsi(closes)
+        rsi_prev = ind.rsi(closes[:-1]) if len(closes) > 16 else rsi
+        ema_9 = ind.ema(closes, 9)
+        ema_21 = ind.ema(closes, 21)
+        velocity = ind.price_velocity(closes, 3)
 
-        rsi_now = ind.rsi(closes_5m)
-        rsi_prev = ind.rsi(closes_5m[:-1]) if len(closes_5m) > 15 else rsi_now
-        velocity = ind.price_velocity(closes_5m, 3)
+        long_signal = ema_9 > ema_21 and rsi > rsi_prev and 40 < rsi < 65 and velocity > 0.1
+        short_signal = ema_9 < ema_21 and rsi < rsi_prev and 35 < rsi < 60 and velocity < -0.1
 
-        closes_1m = self.candles.get_closes(Timeframe.M1, 5)
-        candle_1m_green = len(closes_1m) >= 2 and closes_1m[-1] > closes_1m[-2]
-        candle_1m_red = len(closes_1m) >= 2 and closes_1m[-1] < closes_1m[-2]
-        trend_5m_up = len(closes_5m) >= 3 and closes_5m[-1] > closes_5m[-3]
-        trend_5m_down = len(closes_5m) >= 3 and closes_5m[-1] < closes_5m[-3]
-        last_candle_green = candle_1m_green or trend_5m_up or velocity > 0.05
-        last_candle_red = candle_1m_red or trend_5m_down or velocity < -0.05
-        bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes_5m)
+        if not long_signal and not short_signal:
+            reasons = []
+            if ema_9 <= ema_21 and ema_9 >= ema_21:
+                reasons.append("EMAs flat")
+            elif ema_9 > ema_21:
+                if rsi <= rsi_prev:
+                    reasons.append(f"RSI falling ({rsi:.0f})")
+                elif rsi >= 65:
+                    reasons.append(f"RSI too high ({rsi:.0f})")
+                elif rsi <= 40:
+                    reasons.append(f"RSI too low ({rsi:.0f})")
+                elif velocity <= 0.1:
+                    reasons.append(f"velocity too low ({velocity:.2f}%)")
+            else:
+                if rsi >= rsi_prev:
+                    reasons.append(f"RSI rising ({rsi:.0f})")
+                elif rsi <= 35:
+                    reasons.append(f"RSI too low ({rsi:.0f})")
+                elif rsi >= 60:
+                    reasons.append(f"RSI too high ({rsi:.0f})")
+                elif velocity >= -0.1:
+                    reasons.append(f"velocity too high ({velocity:.2f}%)")
+            ema_dir = "up" if ema_9 > ema_21 else "down"
+            return self._no_signal(price, f"EMA {ema_dir} RSI={rsi:.0f} vel={velocity:.2f}% {' '.join(reasons)}")
 
-        if regime == MarketRegime.TRENDING_DOWN:
-            if rsi_now <= self.EXTREME_RSI_LONG and rsi_prev < rsi_now and last_candle_green:
-                return self._confirmed_reversal(price, "long", rsi_now, assessment)
-            if rsi_now < 40:
-                return self._no_signal(price, f"trend_short_blocked_rsi_already_oversold ({rsi_now:.1f})")
-            if last_candle_red:
-                return self._trend_signal(price, "short", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
-            return self._no_signal(price, "trending_down_waiting_for_red_candle")
+        if long_signal:
+            confidence = 0.7
+            reasons = [f"EMA9>EMA21 ({timeframe_label})", f"RSI={rsi:.0f} rising", f"vel={velocity:.2f}%"]
+            if rsi < 50:
+                confidence += 0.1
+                reasons.append("RSI<50 (room to run)")
+            if velocity > 0.3:
+                confidence += 0.1
+                reasons.append("strong velocity")
 
-        if regime == MarketRegime.TRENDING_UP:
-            if rsi_now >= self.EXTREME_RSI_SHORT and rsi_prev > rsi_now and last_candle_red:
-                return self._confirmed_reversal(price, "short", rsi_now, assessment)
-            if rsi_now > 60:
-                return self._no_signal(price, f"trend_long_blocked_rsi_already_overbought ({rsi_now:.1f})")
-            if last_candle_green:
-                return self._trend_signal(price, "long", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
-            return self._no_signal(price, "trending_up_waiting_for_green_candle")
+            return TradeSignal(
+                type=SignalType.LONG, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 - self.TREND_SL_PCT),
+                take_profit=price * (1 + self.TREND_TP_PCT),
+                regime="trend_follow", trade_type="trend_follow",
+                reason=", ".join(reasons), timestamp=now,
+                indicators={"rsi": rsi, "ema_9": ema_9, "ema_21": ema_21, "velocity": velocity},
+            )
+        else:
+            confidence = 0.7
+            reasons = [f"EMA9<EMA21 ({timeframe_label})", f"RSI={rsi:.0f} falling", f"vel={velocity:.2f}%"]
+            if rsi > 50:
+                confidence += 0.1
+                reasons.append("RSI>50 (room to fall)")
+            if velocity < -0.3:
+                confidence += 0.1
+                reasons.append("strong velocity")
 
-        if regime in (MarketRegime.RANGING, MarketRegime.VOLATILE_RANGING):
-            return self._mean_reversion_signal(price, regime, assessment, last_candle_green, last_candle_red)
-
-        return self._no_signal(price)
+            return TradeSignal(
+                type=SignalType.SHORT, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 + self.TREND_SL_PCT),
+                take_profit=price * (1 - self.TREND_TP_PCT),
+                regime="trend_follow", trade_type="trend_follow",
+                reason=", ".join(reasons), timestamp=now,
+                indicators={"rsi": rsi, "ema_9": ema_9, "ema_21": ema_21, "velocity": velocity},
+            )
 
     def _confirmed_reversal(self, price: float, direction: str, rsi_val: float, assessment) -> TradeSignal:
         confidence = 0.80
@@ -423,7 +462,7 @@ class SignalEngine:
         if direction == "short" and current_price <= tp:
             return self._exit_signal(current_price, SignalType.CLOSE_SHORT, "take_profit_hit")
 
-        if trade_type == "momentum":
+        if trade_type in ("momentum", "trend_follow"):
             if direction == "long" and peak > entry:
                 trail_stop = peak * (1 - self.MOM_TRAILING_STOP_PCT)
                 if current_price <= trail_stop:
@@ -445,9 +484,12 @@ class SignalEngine:
                 return self._exit_signal(current_price, SignalType.CLOSE_SHORT, "regime_now_trending_up")
 
         age = now - opened_at
-        max_hold = self.MR_MAX_HOLD if trade_type == "mean_reversion" else self.MOM_MAX_HOLD
-        if trade_type == "mean_reversion" and self.regime_detector.regime == MarketRegime.VOLATILE_RANGING:
-            max_hold = self.AMR_MAX_HOLD
+        if trade_type == "trend_follow":
+            max_hold = self.TREND_MAX_HOLD
+        elif trade_type == "mean_reversion":
+            max_hold = self.AMR_MAX_HOLD if self.regime_detector.regime == MarketRegime.VOLATILE_RANGING else self.MR_MAX_HOLD
+        else:
+            max_hold = self.MOM_MAX_HOLD
         if age > max_hold:
             close_type = SignalType.CLOSE_LONG if direction == "long" else SignalType.CLOSE_SHORT
             return self._exit_signal(current_price, close_type, f"time_exit ({age/60:.0f}min)")
@@ -455,7 +497,7 @@ class SignalEngine:
         return None
 
     def update_trailing_stop(self, position: dict, current_price: float) -> float | None:
-        if position["trade_type"] != "momentum":
+        if position["trade_type"] not in ("momentum", "trend_follow"):
             return None
         direction = position["direction"]
         peak = position.get("peak_price", position["entry_price"])
