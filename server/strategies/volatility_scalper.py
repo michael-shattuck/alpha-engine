@@ -278,14 +278,17 @@ class VolatilityScalper(BaseStrategy):
             leverage = action["leverage"]
             direction = "long" if act == "open_long" else "short"
 
-            asset_price = self._asset_prices.get(signal.asset, sol_price)
+            asset_price = self._asset_prices.get(signal.asset, 0)
+            if asset_price <= 0:
+                log.warning(f"No price for {signal.asset}, skipping trade")
+                return None
 
             trade = {
                 "id": str(uuid.uuid4())[:12],
                 "direction": direction,
                 "trade_type": signal.trade_type,
                 "asset": signal.asset,
-                "entry_price": asset_price,
+                "entry_price": signal.entry_price,
                 "current_price": asset_price,
                 "stop_loss": signal.stop_loss,
                 "take_profit": signal.take_profit,
@@ -294,7 +297,7 @@ class VolatilityScalper(BaseStrategy):
                 "collateral_usd": size,
                 "pnl_usd": 0,
                 "pnl_pct": 0,
-                "peak_price": sol_price,
+                "peak_price": asset_price,
                 "regime_at_entry": signal.regime,
                 "signal_confidence": signal.confidence,
                 "opened_at": time.time(),
