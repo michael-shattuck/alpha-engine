@@ -166,23 +166,32 @@ class SignalEngine:
         closes_5m = self.candles.get_closes(Timeframe.M5, 30)
         if len(closes_5m) < 15:
             return self._no_signal(price, "insufficient_5m_data")
+
+        closes_1m = self.candles.get_closes(Timeframe.M1, 5)
+        last_candle_green = len(closes_1m) >= 2 and closes_1m[-1] > closes_1m[-2]
+        last_candle_red = len(closes_1m) >= 2 and closes_1m[-1] < closes_1m[-2]
+
         rsi_now = ind.rsi(closes_5m)
         rsi_prev = ind.rsi(closes_5m[:-1]) if len(closes_5m) > 15 else rsi_now
         velocity = ind.price_velocity(closes_5m, 3)
         bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes_5m)
 
         if regime == MarketRegime.TRENDING_DOWN:
-            if rsi_now <= self.EXTREME_RSI_LONG and rsi_prev < rsi_now and velocity > -0.1:
+            if rsi_now <= self.EXTREME_RSI_LONG and rsi_prev < rsi_now and last_candle_green:
                 return self._confirmed_reversal(price, "long", rsi_now, assessment)
-            return self._trend_signal(price, "short", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
+            if last_candle_red:
+                return self._trend_signal(price, "short", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
+            return self._no_signal(price, "trending_down_waiting_for_red_candle")
 
         if regime == MarketRegime.TRENDING_UP:
-            if rsi_now >= self.EXTREME_RSI_SHORT and rsi_prev > rsi_now and velocity < 0.1:
+            if rsi_now >= self.EXTREME_RSI_SHORT and rsi_prev > rsi_now and last_candle_red:
                 return self._confirmed_reversal(price, "short", rsi_now, assessment)
-            return self._trend_signal(price, "long", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
+            if last_candle_green:
+                return self._trend_signal(price, "long", rsi_now, velocity, bb_lower, bb_middle, bb_upper, assessment)
+            return self._no_signal(price, "trending_up_waiting_for_green_candle")
 
         if regime in (MarketRegime.RANGING, MarketRegime.VOLATILE_RANGING):
-            return self._mean_reversion_signal(price, regime, assessment)
+            return self._mean_reversion_signal(price, regime, assessment, last_candle_green, last_candle_red)
 
         return self._no_signal(price)
 
@@ -275,7 +284,8 @@ class SignalEngine:
                 indicators={"rsi_5m": rsi_val, "velocity": velocity},
             )
 
-    def _mean_reversion_signal(self, price: float, regime: MarketRegime, assessment) -> TradeSignal:
+    def _mean_reversion_signal(self, price: float, regime: MarketRegime, assessment,
+                               last_candle_green: bool = True, last_candle_red: bool = True) -> TradeSignal:
         aggressive = regime == MarketRegime.VOLATILE_RANGING
         tf = Timeframe.M5
         closes = self.candles.get_closes(tf, 30)
@@ -332,6 +342,11 @@ class SignalEngine:
 
         if direction is None:
             return self._no_signal(price, "no_mr_signal")
+
+        if direction == "long" and not last_candle_green:
+            return self._no_signal(price, f"mr_long_waiting_for_green_candle (RSI={rsi_val:.1f})")
+        if direction == "short" and not last_candle_red:
+            return self._no_signal(price, f"mr_short_waiting_for_red_candle (RSI={rsi_val:.1f})")
 
         if vwap_val > 0:
             vwap_dist = abs(price - vwap_val) / vwap_val
