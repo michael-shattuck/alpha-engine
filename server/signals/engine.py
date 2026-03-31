@@ -167,10 +167,13 @@ class SignalEngine:
         if len(closes_5m) < 15:
             return self._no_signal(price, "insufficient_5m_data")
 
-        price_rising = len(closes_5m) >= 3 and closes_5m[-1] > closes_5m[-3]
-        price_falling = len(closes_5m) >= 3 and closes_5m[-1] < closes_5m[-3]
-        last_candle_green = price_rising or velocity > 0.05
-        last_candle_red = price_falling or velocity < -0.05
+        closes_1m = self.candles.get_closes(Timeframe.M1, 5)
+        candle_1m_green = len(closes_1m) >= 2 and closes_1m[-1] > closes_1m[-2]
+        candle_1m_red = len(closes_1m) >= 2 and closes_1m[-1] < closes_1m[-2]
+        trend_5m_up = len(closes_5m) >= 3 and closes_5m[-1] > closes_5m[-3]
+        trend_5m_down = len(closes_5m) >= 3 and closes_5m[-1] < closes_5m[-3]
+        last_candle_green = candle_1m_green or trend_5m_up or velocity > 0.05
+        last_candle_red = candle_1m_red or trend_5m_down or velocity < -0.05
 
         rsi_now = ind.rsi(closes_5m)
         rsi_prev = ind.rsi(closes_5m[:-1]) if len(closes_5m) > 15 else rsi_now
