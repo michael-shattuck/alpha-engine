@@ -56,6 +56,11 @@ class VolatilityScalper(BaseStrategy):
         import httpx
         from server.signals.candles import Candle, Timeframe, TIMEFRAME_SECONDS, MAX_CANDLES
 
+        await self._fetch_asset_prices()
+        for asset in TRACKED_ASSETS:
+            if self._asset_prices.get(asset, 0) <= 0:
+                log.warning(f"No price for {asset} after initial fetch")
+
         async with httpx.AsyncClient(timeout=60) as http:
             for asset, engine in self.engines.items():
                 try:
