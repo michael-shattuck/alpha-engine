@@ -21,7 +21,7 @@ class VolatilityScalper(BaseStrategy):
     STRATEGY_NAME = "Volatility Scalper"
 
     MAX_CONCURRENT_POSITIONS = 7
-    MAX_TRADES_PER_DAY = 100
+    MAX_TRADES_PER_DAY = 999999
     MAX_LEVERAGE = 3.0
     MIN_TRADE_USD = 10.0
     POSITION_SIZE_PCT = 0.14
