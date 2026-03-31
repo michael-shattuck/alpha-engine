@@ -25,6 +25,9 @@ export default function ScalperPage() {
   const ds = sc?.daily_stats ?? { trades_today: 0, wins: 0, losses: 0, daily_pnl_usd: 0, daily_pnl_pct: 0, win_rate: 0 }
   const perf = sc?.signal_performance ?? { total_signals: 0, win_rate: 0, profit_factor: 0, by_regime: {} }
   const regime = sc?.regime ?? 'unknown'
+  const activeTrades = sc?.active_trades ?? []
+  const unrealizedPnl = activeTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0)
+  const totalPnl = ds.daily_pnl_usd + unrealizedPnl
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -41,32 +44,40 @@ export default function ScalperPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5 mb-4">
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-600">Regime</div>
-              <div className={`text-sm font-semibold ${REGIME_COLORS[regime] ?? 'text-gray-500'}`}>
-                {REGIME_LABELS[regime] ?? regime}
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Total PnL</div>
+              <div className={`font-mono text-lg font-bold ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                ${totalPnl.toFixed(2)}
               </div>
-              <div className="text-[10px] text-gray-600">{((sc?.regime_confidence ?? 0) * 100).toFixed(0)}% confidence</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-600">Daily PnL</div>
-              <div className={`font-mono text-sm font-bold ${ds.daily_pnl_usd >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                ${ds.daily_pnl_usd.toFixed(2)}
-              </div>
-              <div className={`font-mono text-[10px] ${ds.daily_pnl_pct >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {ds.daily_pnl_pct >= 0 ? '+' : ''}{ds.daily_pnl_pct.toFixed(2)}%
+              <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                realized: ${ds.daily_pnl_usd.toFixed(2)} | open: ${unrealizedPnl.toFixed(2)}
               </div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-600">Today</div>
-              <div className="font-mono text-sm text-gray-300" style={{ fontVariantNumeric: 'tabular-nums' }}>{ds.trades_today} trades</div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Active</div>
+              <div className="font-mono text-lg font-bold text-blue-400" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {activeTrades.length}
+              </div>
+              <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                of 7 assets
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Completed</div>
+              <div className="font-mono text-sm text-gray-300" style={{ fontVariantNumeric: 'tabular-nums' }}>{ds.trades_today}</div>
               <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>{ds.wins}W / {ds.losses}L</div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-600">Win Rate</div>
-              <div className={`font-mono text-sm font-bold ${ds.win_rate >= 0.55 ? 'text-green-400' : ds.win_rate >= 0.45 ? 'text-yellow-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {(ds.win_rate * 100).toFixed(0)}%
+              <div className={`font-mono text-sm font-bold ${ds.win_rate >= 0.8 ? 'text-green-400' : ds.win_rate >= 0.6 ? 'text-yellow-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {ds.trades_today > 0 ? `${(ds.win_rate * 100).toFixed(0)}%` : '--'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-600">Regime</div>
+              <div className={`text-sm font-semibold ${REGIME_COLORS[regime] ?? 'text-gray-500'}`}>
+                {REGIME_LABELS[regime] ?? regime}
               </div>
             </div>
           </div>

@@ -21,10 +21,16 @@ export default function DashboardPage() {
   const regime = scalper.data?.regime ?? 'unknown'
   const sol = d.sol_price
 
+  const activeTrades = scalper.data?.active_trades ?? []
+  const unrealizedPnl = activeTrades.reduce((sum: number, t: { pnl_usd?: number }) => sum + (t.pnl_usd ?? 0), 0)
+  const realizedPnl = scalper.data?.daily_stats?.daily_pnl_usd ?? 0
+  const scalperTotalPnl = realizedPnl + unrealizedPnl
+
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
         <StatCard label="Portfolio" value={fmt(d.total_value)} sub={pct(d.total_pnl_percent)} positive={d.total_pnl >= 0} />
+        <StatCard label="Scalper PnL" value={fmt(scalperTotalPnl)} sub={`${activeTrades.length} active | ${scalper.data?.daily_stats?.trades_today ?? 0} done`} positive={scalperTotalPnl >= 0} />
         <StatCard label="SOL Price" value={fmt(sol)} sub={`${market.data?.sol_change_1h?.toFixed(2) ?? '0'}% 1h`} positive={(market.data?.sol_change_1h ?? 0) >= 0} />
         <StatCard label="Projected MPY" value={`${d.projected_mpy.toFixed(1)}%`} sub={`${d.projected_dpy.toFixed(2)}%/day`} positive={d.projected_mpy >= 0} />
         <StatCard label="Regime" value={REGIME_LABELS[regime] ?? regime} sub={`${((scalper.data?.regime_confidence ?? 0) * 100).toFixed(0)}% confidence`} color={REGIME_COLORS[regime]} />

@@ -108,7 +108,10 @@ class BaseStrategy(ABC):
         active = [p for p in self.positions if p.status == "active"]
         if not active:
             return self.capital_allocated
-        return sum(p.current_value_usd + p.fees_earned_usd for p in active)
+        deployed = sum(p.deposit_usd for p in active)
+        position_value = sum(p.current_value_usd + p.fees_earned_usd for p in active)
+        undeployed = max(self.capital_allocated - deployed, 0)
+        return position_value + undeployed
 
     @property
     def total_fees(self) -> float:
