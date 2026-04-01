@@ -6,6 +6,7 @@ from typing import Optional
 from server.strategies.base import BaseStrategy, StrategyPosition
 from server.signals.engine import SignalEngine, SignalType, TradeSignal
 from server.signals.regime import MarketRegime
+from server.signals.learner import TradeLearner
 from server.execution.orca import OrcaExecutor
 from server.execution.marginfi import MarginFiLender
 from server.execution.drift import DriftExecutor
@@ -33,6 +34,7 @@ class VolatilityScalper(BaseStrategy):
         super().__init__(mode=mode)
         self.engines: dict[str, SignalEngine] = {asset: SignalEngine(asset=asset) for asset in TRACKED_ASSETS}
         self.signal_engine = self.engines["SOL"]
+        self.learner = TradeLearner()
         self.orca: OrcaExecutor | None = None
         self.lender: MarginFiLender | None = None
         self.drift: DriftExecutor | None = None
@@ -268,10 +270,38 @@ class VolatilityScalper(BaseStrategy):
             already_trading = any(t["asset"] == asset and t["status"] == "active" for t in self._active_trades)
             if already_trading:
                 continue
+
+            self.learner.check_regret(asset, price)
+
             signal = engine.evaluate(price)
-            if signal.type in (SignalType.LONG, SignalType.SHORT) and signal.confidence > best_confidence:
+            if signal.type not in (SignalType.LONG, SignalType.SHORT):
+                continue
+
+            allowed, adj_conf, learn_reason = self.learner.get_entry_filter(
+                asset, signal.type.value, signal.confidence, signal.trade_type
+            )
+            if not allowed:
+                log.info(f"Learner blocked {asset} {signal.type.value}: {learn_reason}")
+                self.learner.record_skipped_signal(asset, signal.type.value, signal.entry_price, signal.take_profit)
+                continue
+
+            tp_mult, sl_mult = self.learner.get_tp_sl_multipliers(asset)
+            if tp_mult != 1.0 or sl_mult != 1.0:
+                if signal.type == SignalType.LONG:
+                    tp_dist = (signal.take_profit - signal.entry_price) * tp_mult
+                    sl_dist = (signal.entry_price - signal.stop_loss) * sl_mult
+                    signal.take_profit = signal.entry_price + tp_dist
+                    signal.stop_loss = signal.entry_price - sl_dist
+                else:
+                    tp_dist = (signal.entry_price - signal.take_profit) * tp_mult
+                    sl_dist = (signal.stop_loss - signal.entry_price) * sl_mult
+                    signal.take_profit = signal.entry_price - tp_dist
+                    signal.stop_loss = signal.entry_price + sl_dist
+
+            signal.confidence = adj_conf
+            if adj_conf > best_confidence:
                 best_signal = signal
-                best_confidence = signal.confidence
+                best_confidence = adj_conf
 
         if not best_signal:
             return {"action": "hold", "reason": "no_signal_across_assets"}
@@ -429,6 +459,7 @@ class VolatilityScalper(BaseStrategy):
         asset = trade.get("asset", "SOL")
         engine = self.engines.get(asset, self.signal_engine)
         engine.record_close(not was_win)
+        self.learner.record_trade_close(trade)
 
         trade["exit_price"] = exit_price
         trade["exit_reason"] = reason
@@ -461,6 +492,7 @@ class VolatilityScalper(BaseStrategy):
                 base *= 0.5
 
         base *= min(signal.confidence / 0.8, 1.0)
+        base *= self.learner.get_size_multiplier(signal.asset)
 
         return max(base, 0)
 
@@ -516,6 +548,7 @@ class VolatilityScalper(BaseStrategy):
         base = super().get_state()
         base["active_trades"] = [t for t in self._active_trades if t["status"] == "active"]
         base["trade_log"] = self._trade_log[-50:]
+        base["learner"] = self.learner.get_state()
         base["daily_stats"] = {
             "trades_today": self._daily_trade_count,
             "wins": self._daily_wins,
@@ -531,6 +564,8 @@ class VolatilityScalper(BaseStrategy):
     def load_state(self, state: dict):
         super().load_state(state)
         self._trade_log = state.get("trade_log", [])
+        if "learner" in state:
+            self.learner.load_state(state["learner"])
         ds = state.get("daily_stats", {})
         self._daily_trade_count = ds.get("trades_today", 0)
         self._daily_wins = ds.get("wins", 0)

@@ -272,6 +272,7 @@ async def get_scalper():
         active_trade = next((t for t in scalper._active_trades if t.get("asset") == asset and t["status"] == "active"), None)
         signal = engine.evaluate(price) if engine.is_warmed_up and price > 0 else None
 
+        profile = scalper.learner.get_profile(asset)
         assets.append({
             "symbol": asset,
             "price": price,
@@ -291,6 +292,18 @@ async def get_scalper():
                 "stop_loss": active_trade["stop_loss"],
                 "take_profit": active_trade["take_profit"],
             } if active_trade else None,
+            "learner": {
+                "trades": profile.trades,
+                "win_rate": profile.win_rate,
+                "pain": profile.pain,
+                "regret": profile.regret,
+                "size_mult": profile.size_multiplier,
+                "conf_adj": profile.confidence_adjustment,
+                "tp_mult": profile.tp_multiplier,
+                "short_penalty": profile.short_penalty,
+                "consecutive_losses": profile.consecutive_losses,
+                "consecutive_wins": profile.consecutive_wins,
+            } if profile.trades > 0 else None,
         })
 
     return {
