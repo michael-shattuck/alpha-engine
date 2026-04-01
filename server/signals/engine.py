@@ -154,10 +154,12 @@ class SignalEngine:
     DEFAULT_CONFIG = {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35}
 
     TF_WEIGHTS = {
-        Timeframe.H1: 0.30,
-        Timeframe.M15: 0.25,
-        Timeframe.M5: 0.25,
-        Timeframe.M1: 0.20,
+        Timeframe.D1: 0.10,
+        Timeframe.H4: 0.15,
+        Timeframe.H1: 0.20,
+        Timeframe.M15: 0.20,
+        Timeframe.M5: 0.20,
+        Timeframe.M1: 0.15,
     }
 
     def evaluate(self, current_price: float = 0) -> TradeSignal:
@@ -191,17 +193,22 @@ class SignalEngine:
             tf_scores[tf] = score * weight
             tf_details[tf] = detail
 
-        if ready_count < 2:
+        if ready_count < 3:
             return self._no_signal(price, "warmup")
 
         total_score = sum(tf_scores.values())
 
+        higher_tf_bias = sum(tf_scores.get(tf, 0) for tf in [Timeframe.D1, Timeframe.H4, Timeframe.H1])
+        lower_tf_bias = sum(tf_scores.get(tf, 0) for tf in [Timeframe.M15, Timeframe.M5, Timeframe.M1])
+
         reasons = []
-        for tf in [Timeframe.H1, Timeframe.M15, Timeframe.M5, Timeframe.M1]:
+        for tf in [Timeframe.D1, Timeframe.H4, Timeframe.H1, Timeframe.M15, Timeframe.M5, Timeframe.M1]:
             if tf in tf_details and tf_details[tf] != "insufficient":
                 reasons.append(f"{tf.value}:{tf_details[tf]}")
 
         if total_score > acfg["thresh"]:
+            if higher_tf_bias < 0:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED higher TFs bearish ({higher_tf_bias:.2f})")
             confidence = min(0.5 + total_score, 0.95)
             return TradeSignal(
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
@@ -214,6 +221,8 @@ class SignalEngine:
             )
 
         if total_score < -acfg["thresh"]:
+            if higher_tf_bias > 0:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED higher TFs bullish ({higher_tf_bias:.2f})")
             confidence = min(0.5 + abs(total_score), 0.95)
             return TradeSignal(
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,

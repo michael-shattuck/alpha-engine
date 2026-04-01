@@ -85,7 +85,7 @@ class VolatilityScalper(BaseStrategy):
         async with httpx.AsyncClient(timeout=60) as http:
             for asset, engine in self.engines.items():
                 try:
-                    tf_map = {"1m": Timeframe.M1, "5m": Timeframe.M5, "15m": Timeframe.M15, "1h": Timeframe.H1}
+                    tf_map = {"1m": Timeframe.M1, "5m": Timeframe.M5, "15m": Timeframe.M15, "1h": Timeframe.H1, "4h": Timeframe.H4, "1d": Timeframe.D1}
                     for interval, tf in tf_map.items():
                         r = await http.get(
                             f"https://lens.soon.app/api/assets/{asset}/history",

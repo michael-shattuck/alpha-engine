@@ -9,6 +9,7 @@ class Timeframe(str, Enum):
     M15 = "15m"
     H1 = "1h"
     H4 = "4h"
+    D1 = "1d"
 
 
 @dataclass
@@ -29,6 +30,7 @@ TIMEFRAME_SECONDS = {
     Timeframe.M15: 900,
     Timeframe.H1: 3600,
     Timeframe.H4: 14400,
+    Timeframe.D1: 86400,
 }
 
 MAX_CANDLES = {
@@ -37,6 +39,7 @@ MAX_CANDLES = {
     Timeframe.M15: 384,
     Timeframe.H1: 168,
     Timeframe.H4: 180,
+    Timeframe.D1: 30,
 }
 
 
