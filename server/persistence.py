@@ -73,7 +73,7 @@ class TradeStore:
         try:
             conn = _conn()
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT * FROM trades ORDER BY opened_at DESC LIMIT %s", (limit,))
+            cur.execute("SELECT * FROM trades WHERE status IN ('active', 'closed') ORDER BY opened_at DESC LIMIT %s", (limit,))
             rows = cur.fetchall()
             conn.close()
             return [dict(r) for r in rows]
