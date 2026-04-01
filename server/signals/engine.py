@@ -181,11 +181,115 @@ class SignalEngine:
             return self._no_signal(price, "cooldown")
 
         acfg = self.ASSET_CONFIGS.get(self.asset, self.DEFAULT_CONFIG)
+        return self._evaluate_combined(price, acfg, now)
 
-        if self._ml_predictor and self._ml_predictor._loaded and self.asset in self._ml_predictor._dir_models:
-            return self._evaluate_ml(price, acfg, now)
+    ML_WEIGHT = 0.4
+    TF_WEIGHT = 0.6
 
-        return self._evaluate_scoring(price, acfg, now)
+    def _evaluate_combined(self, price, acfg, now):
+        tf_scores = {}
+        ready_count = 0
+        for tf, weight in self.TF_WEIGHTS.items():
+            closes = self.candles.get_closes(tf, 30)
+            highs = self.candles.get_highs(tf, 30)
+            lows = self.candles.get_lows(tf, 30)
+            if len(closes) < 15:
+                tf_scores[tf] = 0
+                continue
+            ready_count += 1
+            score, _ = self._score_timeframe(closes, highs, lows, price)
+            tf_scores[tf] = score * weight
+
+        if ready_count < 3:
+            return self._no_signal(price, "warmup")
+
+        tf_total = sum(tf_scores.values())
+
+        ml_direction = 0
+        ml_confidence = 0.0
+        ml_magnitude = 0.0
+        has_ml = self._ml_predictor and self._ml_predictor._loaded and self.asset in self._ml_predictor._dir_models
+
+        if has_ml:
+            c1 = self.candles.get_closes(Timeframe.M1, 30)
+            c5 = self.candles.get_closes(Timeframe.M5, 30)
+            c15 = self.candles.get_closes(Timeframe.M15, 30)
+            c60 = self.candles.get_closes(Timeframe.H1, 30)
+            c240 = self.candles.get_closes(Timeframe.H4, 30)
+            if len(c1) >= 15 and len(c5) >= 15 and len(c15) >= 15:
+                f1 = tf_features(c1, price)
+                f5 = tf_features(c5, price)
+                f15 = tf_features(c15, price)
+                f60 = tf_features(c60, price) if len(c60) >= 15 else [0] * 10
+                f240 = tf_features(c240, price) if len(c240) >= 15 else [0] * 10
+                ml_direction, ml_confidence, ml_magnitude = self._ml_predictor.predict(
+                    self.asset, f1, f5, f15, f60, f240
+                )
+
+        if has_ml and ml_confidence > 0.5:
+            ml_score = ml_direction * ml_confidence
+            combined = tf_total * self.TF_WEIGHT + ml_score * self.ML_WEIGHT
+        else:
+            combined = tf_total
+
+        tf_bullish = tf_total > 0.15
+        tf_bearish = tf_total < -0.15
+        ml_bullish = ml_direction == 1 and ml_confidence > 0.5
+        ml_bearish = ml_direction == -1 and ml_confidence > 0.5
+
+        reasons = []
+        for tf in [Timeframe.D1, Timeframe.H4, Timeframe.H1, Timeframe.M15, Timeframe.M5, Timeframe.M1]:
+            closes = self.candles.get_closes(tf, 30)
+            highs = self.candles.get_highs(tf, 30)
+            lows = self.candles.get_lows(tf, 30)
+            if len(closes) >= 15:
+                _, detail = self._score_timeframe(closes, highs, lows, price)
+                reasons.append(f"{tf.value}:{detail}")
+
+        ml_tag = f" ML:{ml_direction}@{ml_confidence:.0%}" if has_ml else ""
+        reason_str = f"combined={combined:.2f} tf={tf_total:.2f}{ml_tag} " + ", ".join(reasons[:4])
+
+        if combined > acfg["thresh"]:
+            if has_ml and ml_bearish:
+                return self._no_signal(price, f"{reason_str} BLOCKED ML disagrees (bearish)")
+            if not tf_bullish and not ml_bullish:
+                return self._no_signal(price, f"{reason_str} no confirmation")
+
+            confidence = min(0.5 + abs(combined), 0.95)
+            if has_ml and ml_bullish:
+                confidence = min(confidence + 0.1, 0.95)
+
+            return TradeSignal(
+                type=SignalType.LONG, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 - acfg["sl"]),
+                take_profit=price * 1.50,
+                regime="combined", trade_type="combined",
+                reason=reason_str, timestamp=now,
+                indicators={"combined": combined, "tf_score": tf_total, "ml_dir": ml_direction, "ml_conf": ml_confidence},
+            )
+
+        if combined < -acfg["thresh"]:
+            if has_ml and ml_bullish:
+                return self._no_signal(price, f"{reason_str} BLOCKED ML disagrees (bullish)")
+            if not tf_bearish and not ml_bearish:
+                return self._no_signal(price, f"{reason_str} no confirmation")
+
+            confidence = min(0.5 + abs(combined), 0.95)
+            if has_ml and ml_bearish:
+                confidence = min(confidence + 0.1, 0.95)
+
+            return TradeSignal(
+                type=SignalType.SHORT, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 + acfg["sl"]),
+                take_profit=price * 0.50,
+                regime="combined", trade_type="combined",
+                reason=reason_str, timestamp=now,
+                indicators={"combined": combined, "tf_score": tf_total, "ml_dir": ml_direction, "ml_conf": ml_confidence},
+            )
+
+        return self._no_signal(price, reason_str)
 
     def _evaluate_ml(self, price, acfg, now):
         c1 = self.candles.get_closes(Timeframe.M1, 30)
