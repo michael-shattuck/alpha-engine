@@ -330,7 +330,7 @@ async def get_scalper():
                 "unrealized_pnl": upnl,
                 "net_value": collateral + upnl,
                 "starting_capital": 199.04,
-                "total_pnl": (collateral + upnl) - scalper.capital_allocated,
+                "total_pnl": (collateral + upnl) - 199.04,
             }
         except Exception:
             pass
