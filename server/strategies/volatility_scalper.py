@@ -172,12 +172,8 @@ class VolatilityScalper(BaseStrategy):
 
         self._asset_prices["SOL"] = sol_price
         if now - getattr(self, '_last_price_fetch', 0) > 10:
-            if self.drift and self.drift.client:
-                drift_prices = self.drift.get_oracle_prices()
-                if drift_prices:
-                    self._asset_prices.update(drift_prices)
-            else:
-                await self._fetch_asset_prices()
+            await self._fetch_asset_prices()
+            self._last_price_fetch = now
             self._last_price_fetch = now
 
         for asset, engine in self.engines.items():
