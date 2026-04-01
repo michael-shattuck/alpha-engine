@@ -7,11 +7,11 @@ log = logging.getLogger("allocator")
 
 
 REGIME_ALLOCATIONS = {
-    MarketRegime.DEAD:             {"leveraged_lp": 0.70, "volatility_scalper": 0.00, "funding_arb": 0.20, "jlp": 0.10},
-    MarketRegime.RANGING:          {"leveraged_lp": 0.50, "volatility_scalper": 0.30, "funding_arb": 0.15, "jlp": 0.05},
-    MarketRegime.VOLATILE_RANGING: {"leveraged_lp": 0.30, "volatility_scalper": 0.40, "funding_arb": 0.20, "jlp": 0.10},
-    MarketRegime.TRENDING_UP:      {"leveraged_lp": 0.25, "volatility_scalper": 0.45, "funding_arb": 0.25, "jlp": 0.05},
-    MarketRegime.TRENDING_DOWN:    {"leveraged_lp": 0.20, "volatility_scalper": 0.30, "funding_arb": 0.10, "jlp": 0.40},
+    MarketRegime.DEAD:             {"leveraged_lp": 0.70, "volatility_scalper": 0.00, "funding_arb": 0.20, "jlp": 0.10, "smart_money_mirror": 0.00},
+    MarketRegime.RANGING:          {"leveraged_lp": 0.45, "volatility_scalper": 0.25, "funding_arb": 0.15, "jlp": 0.05, "smart_money_mirror": 0.10},
+    MarketRegime.VOLATILE_RANGING: {"leveraged_lp": 0.25, "volatility_scalper": 0.30, "funding_arb": 0.15, "jlp": 0.10, "smart_money_mirror": 0.20},
+    MarketRegime.TRENDING_UP:      {"leveraged_lp": 0.20, "volatility_scalper": 0.35, "funding_arb": 0.15, "jlp": 0.05, "smart_money_mirror": 0.25},
+    MarketRegime.TRENDING_DOWN:    {"leveraged_lp": 0.15, "volatility_scalper": 0.20, "funding_arb": 0.10, "jlp": 0.35, "smart_money_mirror": 0.20},
 }
 
 MAX_REBALANCES_PER_DAY = 12

@@ -16,6 +16,7 @@ from server.strategies.volatile_pairs import VolatilePairsStrategy
 from server.strategies.adaptive_range import AdaptiveRangeStrategy
 from server.strategies.funding_arb import FundingArbStrategy
 from server.strategies.jlp import JLPStrategy
+from server.strategies.smart_money_mirror import SmartMoneyMirror
 from server.strategies.volatility_scalper import VolatilityScalper
 from server.alerts import alerts
 
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI):
     orchestrator.register_strategy(VolatilityScalper(mode=mode))
     orchestrator.register_strategy(FundingArbStrategy(mode=mode))
     orchestrator.register_strategy(JLPStrategy(mode=mode))
+    orchestrator.register_strategy(SmartMoneyMirror(mode=mode))
     orchestrator.register_strategy(VolatilePairsStrategy(mode=mode), dormant=True)
     orchestrator.register_strategy(AdaptiveRangeStrategy(mode=mode), dormant=True)
 
@@ -347,6 +349,25 @@ async def get_scalper():
         "regime": metrics.get("regime", "unknown"),
         "regime_confidence": metrics.get("regime_confidence", 0),
         "asset_regimes": metrics.get("asset_regimes", {}),
+    }
+
+
+@app.get("/api/mirror")
+async def get_mirror():
+    mirror = orchestrator.strategies.get("smart_money_mirror")
+    if not mirror:
+        return {}
+    state = mirror.get_state()
+    return {
+        "sse_connected": state.get("sse_connected", False),
+        "sse_stats": state.get("sse_stats", {}),
+        "wallet_cache_size": state.get("wallet_cache_size", 0),
+        "active_trades": state.get("active_trades", []),
+        "trade_log": state.get("trade_log", []),
+        "signal_log": state.get("signal_log", []),
+        "tier_stats": state.get("tier_stats", {}),
+        "daily_stats": state.get("daily_stats", {}),
+        "metrics": state.get("metrics", {}),
     }
 
 

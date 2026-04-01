@@ -40,11 +40,14 @@ FEE_COMPOUND_INTERVAL = 4 * 3600
 
 DEFAULT_MODE = "paper"
 
+SMART_MONEY_SSE_URL = os.getenv("SMART_MONEY_SSE_URL", "http://4.154.209.244:8081")
+
 DEFAULT_CAPITAL_ALLOCATION = {
-    "leveraged_lp": 0.30,
-    "volatility_scalper": 0.40,
-    "funding_arb": 0.20,
+    "leveraged_lp": 0.25,
+    "volatility_scalper": 0.35,
+    "funding_arb": 0.15,
     "jlp": 0.10,
+    "smart_money_mirror": 0.15,
 }
 
 RISK_LIMITS = {
