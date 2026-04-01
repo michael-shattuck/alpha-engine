@@ -47,6 +47,7 @@ class VolatilityScalper(BaseStrategy):
         self._daily_losses: int = 0
         self._last_trade_time: float = 0.0
         self._daily_reset_time: float = 0.0
+        self.trading_blocked: bool = True
 
     async def init_executors(self):
         if self.mode == "live" and not self.drift:
@@ -249,6 +250,9 @@ class VolatilityScalper(BaseStrategy):
         sol_price = market_data.get("sol_price", 0)
         if sol_price <= 0:
             return {"action": "wait", "reason": "no_price"}
+
+        if self.trading_blocked:
+            return {"action": "wait", "reason": "trading_blocked"}
 
         active_count = len([t for t in self._active_trades if t["status"] == "active"])
 
@@ -602,10 +606,3 @@ class VolatilityScalper(BaseStrategy):
         self._trade_log = state.get("trade_log", [])
         if "learner" in state:
             self.learner.load_state(state["learner"])
-        ds = state.get("daily_stats", {})
-        self._daily_trade_count = ds.get("trades_today", 0)
-        self._daily_wins = ds.get("wins", 0)
-        self._daily_losses = ds.get("losses", 0)
-        self._daily_pnl = ds.get("daily_pnl_usd", 0)
-        if "signal_engine" in state:
-            self.signal_engine.load_state(state["signal_engine"])

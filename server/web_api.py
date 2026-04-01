@@ -95,6 +95,19 @@ async def toggle_strategy(strategy_id: str, req: ToggleRequest):
     return {"ok": True, "strategy": strategy_id, "enabled": req.enabled}
 
 
+class TradingBlockRequest(BaseModel):
+    blocked: bool
+
+
+@app.post("/api/scalper/trading_block")
+async def toggle_trading_block(req: TradingBlockRequest):
+    scalper = orchestrator.strategies.get("volatility_scalper")
+    if not scalper:
+        raise HTTPException(404, "Scalper not found")
+    scalper.trading_blocked = req.blocked
+    return {"ok": True, "trading_blocked": req.blocked}
+
+
 class AllocationRequest(BaseModel):
     allocations: dict[str, float]
 
