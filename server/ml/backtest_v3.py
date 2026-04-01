@@ -244,4 +244,6 @@ if __name__ == "__main__":
                 print(f"  {name:15} {r['error']}")
                 continue
             print(f"  {name:15} {r['trades']:>4}t WR={r['wr']:>5}% R:R={r['rr_ratio']} daily={r['daily_pnl']:>+7.3f}% avg_w={r['avg_win']:>+5.2f}% avg_l={r['avg_loss']:>+5.2f}% best={r['best_trade']}% worst={r['worst_trade']}%")
-            print(f"                  exit: {json.dumps({k: f\"{v['count']}t ${v['pnl']}\" for k,v in r['by_reason'].items()})}  dir: {json.dumps({k: f\"{v['count']}t ${v['pnl']}\" for k,v in r['by_dir'].items()})}")
+            exit_summary = {k: f"{v['count']}t pnl={v['pnl']}" for k, v in r['by_reason'].items()}
+            dir_summary = {k: f"{v['count']}t pnl={v['pnl']}" for k, v in r['by_dir'].items()}
+            print(f"                  exit: {json.dumps(exit_summary)}  dir: {json.dumps(dir_summary)}")
