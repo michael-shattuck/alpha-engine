@@ -76,6 +76,8 @@ class VolatilityScalper(BaseStrategy):
             else:
                 log.info("No active trades in DB")
 
+            self._restore_daily_stats()
+
         async with httpx.AsyncClient(timeout=60) as http:
             for asset, engine in self.engines.items():
                 try:
@@ -495,6 +497,33 @@ class VolatilityScalper(BaseStrategy):
         base *= self.learner.get_size_multiplier(signal.asset)
 
         return max(base, 0)
+
+    def _restore_daily_stats(self):
+        import psycopg2
+        import psycopg2.extras
+        from datetime import datetime, timezone
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            cur.execute(
+                "SELECT pnl_usd, pnl_pct FROM trades WHERE status = 'closed' AND closed_at >= %s",
+                (today_start,)
+            )
+            rows = cur.fetchall()
+            conn.close()
+            if rows:
+                for r in rows:
+                    pnl = float(r["pnl_usd"] or 0)
+                    self._daily_pnl += pnl
+                    if pnl > 0:
+                        self._daily_wins += 1
+                    elif pnl < 0:
+                        self._daily_losses += 1
+                self._daily_trade_count = len(rows)
+                log.info(f"Restored daily stats from DB: {self._daily_wins}W/{self._daily_losses}L PnL=${self._daily_pnl:.4f}")
+        except Exception as e:
+            log.warning(f"Failed to restore daily stats: {e}")
 
     def _check_daily_reset(self, now: float):
         import calendar
