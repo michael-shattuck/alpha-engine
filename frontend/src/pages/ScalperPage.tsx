@@ -63,10 +63,10 @@ export default function ScalperPage() {
             <div>
               <div className="text-[10px] uppercase tracking-wider text-gray-600">Active / Done</div>
               <div className="font-mono text-sm text-white" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                <span className="text-blue-400">{activeTrades.length} open</span> / {ds.trades_today} closed
+                <span className="text-blue-400">{activeTrades.length} open</span> / {ds.wins + ds.losses} closed
               </div>
               <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {ds.trades_today > 0 ? `${ds.wins}W/${ds.losses}L (${(ds.win_rate * 100).toFixed(0)}%)` : 'no closes yet'}
+                {(ds.wins + ds.losses) > 0 ? `${ds.wins}W/${ds.losses}L (${(ds.win_rate * 100).toFixed(0)}%)` : 'no closes yet'}
               </div>
             </div>
             <div>
