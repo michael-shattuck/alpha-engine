@@ -34,9 +34,9 @@ async def lifespan(app: FastAPI):
     orchestrator = Orchestrator(capital=capital, mode=mode)
     orchestrator.register_strategy(LeveragedLPStrategy(mode=mode))
     orchestrator.register_strategy(VolatilityScalper(mode=mode))
+    orchestrator.register_strategy(FundingArbStrategy(mode=mode))
     orchestrator.register_strategy(VolatilePairsStrategy(mode=mode), dormant=True)
     orchestrator.register_strategy(AdaptiveRangeStrategy(mode=mode), dormant=True)
-    orchestrator.register_strategy(FundingArbStrategy(mode=mode), dormant=True)
 
     orchestrator_task = asyncio.create_task(orchestrator.start())
     log.info(f"Orchestrator started: mode={mode}, capital=${capital:.2f}")
