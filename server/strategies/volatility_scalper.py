@@ -522,6 +522,7 @@ class VolatilityScalper(BaseStrategy):
                     elif pnl < 0:
                         self._daily_losses += 1
                 self._daily_trade_count = len(rows)
+                self._daily_reset_time = int(time.time() // 86400) * 86400
                 log.info(f"Restored daily stats from DB: {self._daily_wins}W/{self._daily_losses}L PnL=${self._daily_pnl:.4f}")
         except Exception as e:
             log.warning(f"Failed to restore daily stats: {e}")
