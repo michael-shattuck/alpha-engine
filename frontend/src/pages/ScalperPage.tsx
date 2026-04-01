@@ -26,7 +26,7 @@ export default function ScalperPage() {
   const perf = sc?.signal_performance ?? { total_signals: 0, win_rate: 0, profit_factor: 0, by_regime: {} }
   const regime = sc?.regime ?? 'unknown'
   const activeTrades = sc?.active_trades ?? []
-  const driftAcct = (sc as any)?.drift_account
+  const driftAcct = sc?.drift_account
   const totalPnl = driftAcct?.total_pnl ?? (ds.daily_pnl_usd + activeTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0))
   const realizedPnl = driftAcct ? (driftAcct.collateral - driftAcct.starting_capital) : ds.daily_pnl_usd
   const unrealizedPnl = driftAcct?.unrealized_pnl ?? activeTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0)

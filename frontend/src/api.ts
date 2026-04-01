@@ -162,6 +162,13 @@ export interface ScalperState {
     daily_pnl_pct: number
     win_rate: number
   }
+  drift_account?: {
+    collateral: number
+    unrealized_pnl: number
+    net_value: number
+    starting_capital: number
+    total_pnl: number
+  }
   indicators: Record<string, number | string>
   signal_performance: {
     total_signals: number
