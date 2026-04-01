@@ -6,7 +6,7 @@ from typing import Optional
 
 from server.strategies.base import BaseStrategy, StrategyPosition
 from server.strategies.sse_consumer import SSEConsumer
-from server.execution.drift import DriftExecutor, MARKET_INDEX
+from server.execution.drift import DriftExecutor, MARKET_INDEX, SETTLEMENT_MARKETS
 from server.config import DATABASE_URL
 from server.persistence import TradeStore
 
@@ -131,13 +131,17 @@ class SmartMoneyMirror(BaseStrategy):
             return
 
         mint = event.get("mint", "")
+        token_name = event.get("token", "").upper()
         symbol = DRIFT_MINT_TO_SYMBOL.get(mint)
         if not symbol:
-            token_name = event.get("token", "").upper()
             if token_name in DRIFT_SYMBOL_SET:
                 symbol = token_name
             else:
+                log.debug(f"Rejected: {token_name} mint={mint[:12]}... not on Drift")
                 return
+
+        if symbol in SETTLEMENT_MARKETS:
+            return
 
         wallet_prefix = event.get("wallet", "")[:12]
         wallet_info = self._wallet_cache.get(wallet_prefix, {})
