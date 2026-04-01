@@ -444,13 +444,19 @@ class VolatilityScalper(BaseStrategy):
 
     async def _close_live_long(self, trade: dict, sol_price: float):
         asset = trade["asset"]
+        oracle_price = self.drift.get_oracle_price(asset)
         result = await self.drift.close_perp_position(asset)
-        log.info(f"Drift close long {asset}: {result}")
+        if oracle_price > 0:
+            trade["_exit_oracle"] = oracle_price
+        log.info(f"Drift close long {asset}: oracle=${oracle_price:.6f} {result.get('status','?')}")
 
     async def _close_live_short(self, trade: dict, sol_price: float):
         asset = trade["asset"]
+        oracle_price = self.drift.get_oracle_price(asset)
         result = await self.drift.close_perp_position(asset)
-        log.info(f"Drift close short {asset}: {result}")
+        if oracle_price > 0:
+            trade["_exit_oracle"] = oracle_price
+        log.info(f"Drift close short {asset}: oracle=${oracle_price:.6f} {result.get('status','?')}")
 
     async def _close_trade(self, trade: dict, exit_price: float, reason: str, market_data: dict):
         trade["status"] = "closing"
@@ -468,12 +474,14 @@ class VolatilityScalper(BaseStrategy):
 
         trade["status"] = "closed"
 
-        if trade["direction"] == "long":
-            pnl_pct = (exit_price - trade["entry_price"]) / trade["entry_price"] * trade["leverage"]
-        else:
-            pnl_pct = (trade["entry_price"] - exit_price) / trade["entry_price"] * trade["leverage"]
+        actual_exit = trade.pop("_exit_oracle", None) or exit_price
 
-        fee_pct = 0.0007 * trade["leverage"]
+        if trade["direction"] == "long":
+            pnl_pct = (actual_exit - trade["entry_price"]) / trade["entry_price"] * trade["leverage"]
+        else:
+            pnl_pct = (trade["entry_price"] - actual_exit) / trade["entry_price"] * trade["leverage"]
+
+        fee_pct = 0.0009 * trade["leverage"]
         pnl_pct -= fee_pct
         pnl_usd = trade["collateral_usd"] * pnl_pct
         trade["pnl_usd"] = pnl_usd
@@ -491,7 +499,7 @@ class VolatilityScalper(BaseStrategy):
         engine.record_close(not was_win)
         self.learner.record_trade_close(trade)
 
-        trade["exit_price"] = exit_price
+        trade["exit_price"] = actual_exit
         trade["exit_reason"] = reason
         trade["closed_at"] = time.time()
         self._trade_log.append(dict(trade))
