@@ -57,7 +57,7 @@ class SignalEngine:
     MOM_VELOCITY_MIN = 0.4
     MOM_TP_PCT = 0.015
     MOM_SL_PCT = 0.005
-    MOM_TRAILING_STOP_PCT = 0.005
+    MOM_TRAILING_STOP_PCT = 0.006
     MOM_MAX_HOLD = 5400
 
     COOLDOWN_AFTER_CLOSE = 60
@@ -147,7 +147,7 @@ class SignalEngine:
         return c.close if c else 0
 
     TP_PCT = 0.0
-    SL_PCT = 0.004
+    SL_PCT = 0.005
     MAX_HOLD = 5400
 
     TF_WEIGHTS = {
@@ -157,8 +157,8 @@ class SignalEngine:
         Timeframe.M1: 0.20,
     }
 
-    LONG_THRESHOLD = 0.30
-    SHORT_THRESHOLD = -0.30
+    LONG_THRESHOLD = 0.50
+    SHORT_THRESHOLD = -0.50
 
     def evaluate(self, current_price: float = 0) -> TradeSignal:
         now = time.time()
