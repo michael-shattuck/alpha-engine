@@ -198,8 +198,27 @@ class SignalEngine:
 
         total_score = sum(tf_scores.values())
 
-        d1_score = tf_scores.get(Timeframe.D1, 0) / self.TF_WEIGHTS.get(Timeframe.D1, 0.10)
-        h4_score = tf_scores.get(Timeframe.H4, 0) / self.TF_WEIGHTS.get(Timeframe.H4, 0.15)
+        d1_closes = self.candles.get_closes(Timeframe.D1, 30)
+        d1_ema_bearish = False
+        d1_ema_bullish = False
+        if len(d1_closes) >= 21:
+            d1_e9 = ind.ema(d1_closes, 9)
+            d1_e21 = ind.ema(d1_closes, 21)
+            d1_ema_bearish = d1_e9 < d1_e21
+            d1_ema_bullish = d1_e9 > d1_e21
+        elif len(d1_closes) >= 9:
+            d1_e9 = ind.ema(d1_closes, 9)
+            d1_ema_bearish = d1_closes[-1] < d1_e9
+            d1_ema_bullish = d1_closes[-1] > d1_e9
+
+        h4_closes = self.candles.get_closes(Timeframe.H4, 30)
+        h4_ema_bearish = False
+        h4_ema_bullish = False
+        if len(h4_closes) >= 21:
+            h4_e9 = ind.ema(h4_closes, 9)
+            h4_e21 = ind.ema(h4_closes, 21)
+            h4_ema_bearish = h4_e9 < h4_e21
+            h4_ema_bullish = h4_e9 > h4_e21
 
         reasons = []
         for tf in [Timeframe.D1, Timeframe.H4, Timeframe.H1, Timeframe.M15, Timeframe.M5, Timeframe.M1]:
@@ -207,10 +226,10 @@ class SignalEngine:
                 reasons.append(f"{tf.value}:{tf_details[tf]}")
 
         if total_score > acfg["thresh"]:
-            if d1_score < -0.1:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1 bearish ({d1_score:.2f})")
-            if d1_score < 0 and h4_score < 0:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1+H4 bearish")
+            if d1_ema_bearish:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1 EMA bearish")
+            if h4_ema_bearish:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED H4 EMA bearish")
             confidence = min(0.5 + total_score, 0.95)
             return TradeSignal(
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
@@ -223,10 +242,10 @@ class SignalEngine:
             )
 
         if total_score < -acfg["thresh"]:
-            if d1_score > 0.1:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1 bullish ({d1_score:.2f})")
-            if d1_score > 0 and h4_score > 0:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1+H4 bullish")
+            if d1_ema_bullish:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1 EMA bullish")
+            if h4_ema_bullish:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED H4 EMA bullish")
             confidence = min(0.5 + abs(total_score), 0.95)
             return TradeSignal(
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
