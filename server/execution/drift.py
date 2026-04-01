@@ -23,24 +23,21 @@ from server.config import SOLANA_RPC_URL, WALLET_PRIVATE_KEY, HELIUS_RPC_URL
 log = logging.getLogger("drift")
 
 MARKET_INDEX = {
-    "SOL": 0,
-    "BTC": 1,
-    "ETH": 2,
-    "1MBONK": 4,
-    "BONK": 4,
-    "SUI": 9,
-    "PYTH": 18,
-    "JTO": 20,
-    "SEI": 21,
-    "WIF": 23,
-    "JUP": 24,
-    "W": 27,
-    "POPCAT": 34,
-    "MOODENG": 45,
-    "PENGU": 62,
-    "TRUMP": 64,
-    "FARTCOIN": 71,
+    "SOL": 0, "BTC": 1, "ETH": 2, "APT": 3, "1MBONK": 4, "BONK": 4,
+    "POL": 5, "ARB": 6, "DOGE": 7, "BNB": 8, "SUI": 9, "1MPEPE": 10,
+    "OP": 11, "RENDER": 12, "XRP": 13, "HNT": 14, "INJ": 15, "LINK": 16,
+    "RLB": 17, "PYTH": 18, "TIA": 19, "JTO": 20, "SEI": 21, "AVAX": 22,
+    "WIF": 23, "JUP": 24, "DYM": 25, "TAO": 26, "W": 27, "KMNO": 28,
+    "TNSR": 29, "DRIFT": 30, "CLOUD": 31, "IO": 32, "ZEX": 33,
+    "POPCAT": 34, "1KWEN": 35, "TON": 42, "MOTHER": 44, "MOODENG": 45,
+    "DBR": 47, "1KMEW": 51, "MEW": 51, "MICHI": 52, "GOAT": 53,
+    "FWOG": 54, "PNUT": 55, "RAY": 56, "HYPE": 59, "LTC": 60, "ME": 61,
+    "PENGU": 62, "AI16Z": 63, "TRUMP": 64, "MELANIA": 65, "BERA": 66,
+    "KAITO": 69, "IP": 70, "FARTCOIN": 71, "ADA": 72, "PAXG": 73,
+    "LAUNCHCOIN": 74, "PUMP": 75, "ASTER": 76,
 }
+
+SETTLEMENT_MARKETS = {"W", "MOODENG"}
 
 
 class DriftExecutor:

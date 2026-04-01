@@ -12,7 +12,7 @@ from server.persistence import TradeStore
 
 log = logging.getLogger("smart_money_mirror")
 
-DRIFT_MINT_MAP = {
+DRIFT_MINT_TO_SYMBOL = {
     "So11111111111111111111111111111111111111112": "SOL",
     "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN": "JUP",
     "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL": "JTO",
@@ -23,17 +23,47 @@ DRIFT_MINT_MAP = {
     "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump": "FARTCOIN",
     "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN": "TRUMP",
     "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr": "POPCAT",
-    "ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY": "MOODENG",
-    "G1vJEgzepqhnVu35BN4jrkv3wVwkujYWFFCxhbEZ1CZr": "SUI",
+    "A98UDy7z8MfmWnTQt6cKjje7UfqV3pTLf4yEbuwL2HrH": "MOODENG",
     "5q2EfdKrV4oSaUGBWCMWjXbYNuSPEFMTig4kgFquTCkB": "SEI",
+    "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof": "RENDER",
+    "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ": "W",
+    "TNSRxcUxoT9xBG3de7PiJyTDYu7kskLqcpddxnEJAS6": "TNSR",
+    "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7": "DRIFT",
+    "CLoUDKc4Ane7HeQcPpE3YHnznRxhMimJ4MyaUqyHFzAu": "CLOUD",
+    "FUAfBo2jgks6gB4Z4LfZkqSZgzNucisEHqnNebaRxM1P": "MELANIA",
+    "MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u": "ME",
+    "3S8qX1MsMqRbiwKg2cQyx7nis1oHMgaCuc9c4VfvVdPN": "MOTHER",
+    "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC": "AI16Z",
+    "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS": "KMNO",
+    "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump": "GOAT",
+    "2qEHjDLDLbuBgRYvsxhc5D6uDWAivNFZGan56P1tpump": "PNUT",
+    "A8C3xuqscfmyLrte3VmTqrAq8kgMASius9AFNANwpump": "FWOG",
+    "5mbK36SZ7J19An8jFochhQS4of8g6BwUjbeCSxBSoWdp": "MICHI",
+    "MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5": "MEW",
+    "BRqZqwPuPLQXQ13LhAVumYP1qewLtnW28Mgk5k4cepLV": "KAITO",
+    "Ey59PH7Z4BFU4HjyKnyMdWt5GGN76KazTAwQihoUXRnk": "LAUNCHCOIN",
+    "AVeMcebYoKKVkJFmwVKWG21EemuN9vGFVFdpNtwcpump": "ASTER",
+    "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R": "RAY",
+    "BZLbGTNCSFfoth2GYDtwr7e4imWzpR5jqcUuGEwr646K": "IO",
 }
 
-SLIPPAGE_MODEL = {
-    "SOL": 0.001, "BTC": 0.001, "ETH": 0.001,
-    "JUP": 0.0015, "JTO": 0.0015, "SUI": 0.0015, "SEI": 0.0015, "PYTH": 0.0015,
-    "WIF": 0.002, "BONK": 0.002, "PENGU": 0.002, "POPCAT": 0.002,
-    "FARTCOIN": 0.003, "TRUMP": 0.003, "MOODENG": 0.003,
-}
+DRIFT_SYMBOL_SET = set(MARKET_INDEX.keys()) - {"1MBONK", "1MPEPE", "1KMEW", "1KWEN"}
+
+DEEP_LIQUIDITY = {"SOL", "BTC", "ETH", "XRP", "DOGE", "LINK", "BNB", "LTC", "ADA", "AVAX"}
+MEDIUM_LIQUIDITY = {"JUP", "JTO", "SUI", "SEI", "PYTH", "RENDER", "RAY", "DRIFT", "INJ", "OP", "ARB", "TON", "HNT", "TIA", "HYPE"}
+THIN_LIQUIDITY = {"WIF", "BONK", "PENGU", "POPCAT", "GOAT", "PNUT", "AI16Z", "TRUMP", "IO", "KMNO", "TNSR", "ME", "BERA"}
+THINNEST_LIQUIDITY = {"FARTCOIN", "MOODENG", "MELANIA", "FWOG", "MICHI", "MEW", "MOTHER", "KAITO", "LAUNCHCOIN", "PUMP", "ASTER", "CLOUD", "ZEX", "DBR", "DYM", "TAO", "RLB", "IP", "W", "APT", "POL", "PAXG"}
+
+def get_slippage(symbol: str) -> float:
+    if symbol in DEEP_LIQUIDITY:
+        return 0.001
+    if symbol in MEDIUM_LIQUIDITY:
+        return 0.0015
+    if symbol in THIN_LIQUIDITY:
+        return 0.002
+    return 0.003
+
+SLIPPAGE_MODEL = {s: get_slippage(s) for s in MARKET_INDEX if s not in ("1MBONK", "1MPEPE", "1KMEW", "1KWEN")}
 
 CONVICTION_TIERS = {
     1: {"name": "max", "leverage": 10.0, "capital_pct": 0.40, "min_confluence": 60, "min_consensus": 2,
@@ -101,9 +131,13 @@ class SmartMoneyMirror(BaseStrategy):
             return
 
         mint = event.get("mint", "")
-        symbol = DRIFT_MINT_MAP.get(mint)
+        symbol = DRIFT_MINT_TO_SYMBOL.get(mint)
         if not symbol:
-            return
+            token_name = event.get("token", "").upper()
+            if token_name in DRIFT_SYMBOL_SET:
+                symbol = token_name
+            else:
+                return
 
         wallet_prefix = event.get("wallet", "")[:12]
         wallet_info = self._wallet_cache.get(wallet_prefix, {})
