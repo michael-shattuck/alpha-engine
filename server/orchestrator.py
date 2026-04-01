@@ -246,6 +246,8 @@ class Orchestrator:
     def _compute_total_equity(self) -> float:
         total = 0
         for s in self.strategies.values():
+            if not s.enabled:
+                continue
             state = s.get_state()
             net = state.get("metrics", {}).get("net_value")
             if net is not None:
