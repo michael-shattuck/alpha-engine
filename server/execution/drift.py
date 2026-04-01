@@ -26,12 +26,20 @@ MARKET_INDEX = {
     "SOL": 0,
     "BTC": 1,
     "ETH": 2,
+    "1MBONK": 4,
+    "BONK": 4,
     "SUI": 9,
     "PYTH": 18,
     "JTO": 20,
     "SEI": 21,
+    "WIF": 23,
     "JUP": 24,
     "W": 27,
+    "POPCAT": 34,
+    "MOODENG": 45,
+    "PENGU": 62,
+    "TRUMP": 64,
+    "FARTCOIN": 71,
 }
 
 

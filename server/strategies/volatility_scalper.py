@@ -14,17 +14,17 @@ from server.persistence import TradeStore, SignalStore
 
 log = logging.getLogger("volatility_scalper")
 
-TRACKED_ASSETS = ["SOL", "JUP", "JTO", "PYTH", "SUI", "SEI"]
+TRACKED_ASSETS = ["SOL", "JUP", "JTO", "PYTH", "SUI", "SEI", "WIF", "PENGU", "FARTCOIN", "TRUMP", "POPCAT", "BONK", "MOODENG"]
 
 
 class VolatilityScalper(BaseStrategy):
     STRATEGY_ID = "volatility_scalper"
     STRATEGY_NAME = "Volatility Scalper"
 
-    MAX_CONCURRENT_POSITIONS = 7
+    MAX_CONCURRENT_POSITIONS = 13
     MAX_LEVERAGE = 3.0
     MIN_TRADE_USD = 1.0
-    POSITION_SIZE_PCT = 0.20
+    POSITION_SIZE_PCT = 0.08
     COOLDOWN_AFTER_LOSS_SEC = 120
     COOLDOWN_AFTER_WIN_SEC = 30
     DAILY_LOSS_LIMIT_PCT = 5.0
@@ -119,29 +119,37 @@ class VolatilityScalper(BaseStrategy):
         "W": "0xeff7446475e218517566ea99e72a4abec2e1bd8498b43b7d8331e29dcb059389",
         "SUI": "0x23d7315113f5b1d3ba7a83604c44b94d79f4fd69af77f804fc7f920a6dc65744",
         "SEI": "0x53614f1cb0c031d4af66c04cb9c756234adad0e1cee85303795091499a4084eb",
+        "WIF": "0x4ca4beeca86f0d164160323817a4e42b10010a724c2217c6ee41b54cd4cc61fc",
+        "BONK": "0x72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419",
+        "PENGU": "0xbed3097008b9b5e3c93bec20be79cb43986b85a996475589351a21e67bae9b61",
+        "FARTCOIN": "0x58cd29ef0e714c5affc44f269b2c1899a52da4169d7acc147b9da692e6953608",
+        "TRUMP": "0x879551021853eec7a7dc827578e8e69da7e4fa8148339aa0d3d5296405be4b1a",
+        "POPCAT": "0xb9312a7ee50e189ef045aa3c7842e099b061bd9bdc99ac645956c3b660dc8cce",
+        "MOODENG": "0xffff73128917a90950cd0473fd2551d7cd274fd5a6cc45641881bbcc6ee73417",
     }
 
     async def _fetch_asset_prices(self):
         import httpx
+        non_sol = {a: fid for a, fid in self.PYTH_FEEDS.items() if a != "SOL"}
+        if not non_sol:
+            return
         try:
             async with httpx.AsyncClient(timeout=10) as http:
-                for asset, fid in self.PYTH_FEEDS.items():
-                    if asset == "SOL":
+                params = [("ids[]", fid) for fid in non_sol.values()]
+                r = await http.get("http://20.120.229.168:4160/api/latest_price_feeds", params=params)
+                if r.status_code != 200:
+                    return
+                feeds = r.json()
+                fid_to_asset = {fid.lstrip("0x"): a for a, fid in non_sol.items()}
+                for feed in feeds:
+                    fid = feed.get("id", "")
+                    asset = fid_to_asset.get(fid)
+                    if not asset:
                         continue
-                    try:
-                        r = await http.get(
-                            "http://20.120.229.168:4160/api/latest_price_feeds",
-                            params={"ids[]": fid},
-                        )
-                        if r.status_code == 200:
-                            feeds = r.json()
-                            if feeds:
-                                pd = feeds[0].get("price", {})
-                                price = int(pd.get("price", 0)) * (10 ** int(pd.get("expo", 0)))
-                                if price > 0:
-                                    self._asset_prices[asset] = price
-                    except Exception:
-                        pass
+                    pd = feed.get("price", {})
+                    price = int(pd.get("price", 0)) * (10 ** int(pd.get("expo", 0)))
+                    if price > 0:
+                        self._asset_prices[asset] = price
         except Exception:
             pass
 
