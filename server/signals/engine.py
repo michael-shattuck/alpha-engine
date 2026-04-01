@@ -198,8 +198,8 @@ class SignalEngine:
 
         total_score = sum(tf_scores.values())
 
-        higher_tf_bias = sum(tf_scores.get(tf, 0) for tf in [Timeframe.D1, Timeframe.H4, Timeframe.H1])
-        lower_tf_bias = sum(tf_scores.get(tf, 0) for tf in [Timeframe.M15, Timeframe.M5, Timeframe.M1])
+        d1_score = tf_scores.get(Timeframe.D1, 0) / self.TF_WEIGHTS.get(Timeframe.D1, 0.10)
+        h4_score = tf_scores.get(Timeframe.H4, 0) / self.TF_WEIGHTS.get(Timeframe.H4, 0.15)
 
         reasons = []
         for tf in [Timeframe.D1, Timeframe.H4, Timeframe.H1, Timeframe.M15, Timeframe.M5, Timeframe.M1]:
@@ -207,8 +207,10 @@ class SignalEngine:
                 reasons.append(f"{tf.value}:{tf_details[tf]}")
 
         if total_score > acfg["thresh"]:
-            if higher_tf_bias < 0:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED higher TFs bearish ({higher_tf_bias:.2f})")
+            if d1_score < -0.1:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1 bearish ({d1_score:.2f})")
+            if d1_score < 0 and h4_score < 0:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1+H4 bearish")
             confidence = min(0.5 + total_score, 0.95)
             return TradeSignal(
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
@@ -221,8 +223,10 @@ class SignalEngine:
             )
 
         if total_score < -acfg["thresh"]:
-            if higher_tf_bias > 0:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED higher TFs bullish ({higher_tf_bias:.2f})")
+            if d1_score > 0.1:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1 bullish ({d1_score:.2f})")
+            if d1_score > 0 and h4_score > 0:
+                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1+H4 bullish")
             confidence = min(0.5 + abs(total_score), 0.95)
             return TradeSignal(
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
