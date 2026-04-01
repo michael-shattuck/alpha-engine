@@ -63,6 +63,9 @@ class VolatilityScalper(BaseStrategy):
         import httpx
         from server.signals.candles import Candle, Timeframe, TIMEFRAME_SECONDS, MAX_CANDLES
 
+        if self.mode == "live":
+            await self.init_executors()
+
         await self._fetch_asset_prices()
         for asset in TRACKED_ASSETS:
             if self._asset_prices.get(asset, 0) <= 0:
@@ -500,6 +503,7 @@ class VolatilityScalper(BaseStrategy):
         return max(base, 0)
 
     def _restore_daily_stats(self):
+        self._daily_reset_time = int(time.time() // 86400) * 86400
         import psycopg2
         import psycopg2.extras
         from datetime import datetime, timezone
@@ -508,7 +512,7 @@ class VolatilityScalper(BaseStrategy):
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             cur.execute(
-                "SELECT pnl_usd, pnl_pct FROM trades WHERE status = 'closed' AND closed_at >= %s",
+                "SELECT pnl_usd, trade_type FROM trades WHERE status = 'closed' AND closed_at >= %s AND trade_type = 'multi_tf'",
                 (today_start,)
             )
             rows = cur.fetchall()
@@ -522,8 +526,9 @@ class VolatilityScalper(BaseStrategy):
                     elif pnl < 0:
                         self._daily_losses += 1
                 self._daily_trade_count = len(rows)
-                self._daily_reset_time = int(time.time() // 86400) * 86400
                 log.info(f"Restored daily stats from DB: {self._daily_wins}W/{self._daily_losses}L PnL=${self._daily_pnl:.4f}")
+            else:
+                log.info("No multi_tf trades today yet")
         except Exception as e:
             log.warning(f"Failed to restore daily stats: {e}")
 
