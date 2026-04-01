@@ -10,8 +10,8 @@ from server.signals import indicators as ind
 log = logging.getLogger("backtest_v4")
 
 DRIFT_FEE_PER_SIDE = 0.00035
-SLIPPAGE_PCT = 0.0015
-ROUNDING_FLAT = 0.002
+SLIPPAGE_PCT = 0.0002
+ROUNDING_FLAT = 0.001
 
 
 @dataclass
