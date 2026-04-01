@@ -306,10 +306,27 @@ async def get_scalper():
             } if profile.trades > 0 else None,
         })
 
+    drift_account = None
+    if scalper.drift and scalper.drift.client:
+        try:
+            user = scalper.drift.client.get_user()
+            collateral = user.get_total_collateral() / 1e6
+            upnl = user.get_unrealized_pnl() / 1e6
+            drift_account = {
+                "collateral": collateral,
+                "unrealized_pnl": upnl,
+                "net_value": collateral + upnl,
+                "starting_capital": scalper.capital_allocated,
+                "total_pnl": (collateral + upnl) - scalper.capital_allocated,
+            }
+        except Exception:
+            pass
+
     return {
         "assets": assets,
         "active_trades": state.get("active_trades", []),
         "daily_stats": state.get("daily_stats", {}),
+        "drift_account": drift_account,
         "indicators": state.get("indicators", {}),
         "signal_performance": state.get("signal_performance", {}),
         "regime": metrics.get("regime", "unknown"),

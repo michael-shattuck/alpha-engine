@@ -26,13 +26,15 @@ export default function ScalperPage() {
   const perf = sc?.signal_performance ?? { total_signals: 0, win_rate: 0, profit_factor: 0, by_regime: {} }
   const regime = sc?.regime ?? 'unknown'
   const activeTrades = sc?.active_trades ?? []
-  const unrealizedPnl = activeTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0)
-  const totalPnl = ds.daily_pnl_usd + unrealizedPnl
-  const capital = strategy.capital_allocated || 1
+  const driftAcct = (sc as any)?.drift_account
+  const totalPnl = driftAcct?.total_pnl ?? (ds.daily_pnl_usd + activeTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0))
+  const realizedPnl = driftAcct ? (driftAcct.collateral - driftAcct.starting_capital) : ds.daily_pnl_usd
+  const unrealizedPnl = driftAcct?.unrealized_pnl ?? activeTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0)
+  const capital = driftAcct?.starting_capital ?? strategy.capital_allocated ?? 1
   const closedCount = ds.wins + ds.losses
-  const avgPnlPerTrade = closedCount > 0 ? ds.daily_pnl_usd / closedCount : 0
+  const avgPnlPerTrade = closedCount > 0 ? totalPnl / closedCount : 0
   const tradesPerDay = Math.max(closedCount, activeTrades.length) * (24 / Math.max(d.uptime_hours || 0.5, 0.5))
-  const projDpy = closedCount >= 2 ? (avgPnlPerTrade * tradesPerDay / capital * 100) : 0
+  const projDpy = closedCount >= 3 ? (avgPnlPerTrade * tradesPerDay / capital * 100) : 0
   const projMpy = projDpy * 30
   const projApy = projDpy * 365
 
@@ -58,7 +60,7 @@ export default function ScalperPage() {
                 ${totalPnl.toFixed(2)}
               </div>
               <div className="font-mono text-[10px] text-gray-500" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                realized: ${ds.daily_pnl_usd.toFixed(2)} | open: ${unrealizedPnl.toFixed(2)}
+                realized: ${realizedPnl.toFixed(2)} | open: ${unrealizedPnl.toFixed(2)}
               </div>
             </div>
             <div>
