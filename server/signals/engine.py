@@ -5,6 +5,7 @@ from enum import Enum
 
 from server.signals.candles import CandleAggregator, Timeframe
 from server.signals.regime import RegimeDetector, MarketRegime
+from server.signals.micro_regime import MicroRegimeDetector, MicroRegime, REGIME_ACTIONS
 from server.signals import indicators as ind
 
 log = logging.getLogger("signal_engine")
@@ -66,6 +67,7 @@ class SignalEngine:
         self.asset = asset
         self.candles = CandleAggregator()
         self.regime_detector = RegimeDetector()
+        self.micro_regime = MicroRegimeDetector()
         self._last_close_time: float = 0
         self._last_close_was_loss: bool = False
         self._signal_history: list[dict] = []
@@ -174,10 +176,12 @@ class SignalEngine:
             return self._no_signal(price, "cooldown")
 
         assessment = self.regime_detector.assess(self.candles)
-        regime = assessment.regime
+        micro = self.micro_regime.assess(self.candles)
 
-        if regime == MarketRegime.DEAD:
-            return self._no_signal(price, "dead market -- no trades")
+        if micro.regime == MicroRegime.DEAD:
+            return self._no_signal(price, "dead market")
+        if micro.regime == MicroRegime.VOLATILE:
+            return self._no_signal(price, f"volatile (vol={micro.volatility_rank:.2f}) -- sitting out")
 
         rsi = ind.rsi(closes)
         rsi_prev = ind.rsi(closes[:-1]) if len(closes) > 16 else rsi
@@ -190,19 +194,33 @@ class SignalEngine:
         closes_1h = self.candles.get_closes(Timeframe.H1, 30)
         adx_val = ind.adx(highs_1h, lows_1h, closes_1h) if len(closes_1h) >= 14 else 0
 
-        if regime in (MarketRegime.RANGING, MarketRegime.VOLATILE_RANGING):
+        allowed = micro.allowed_actions
+        regime = assessment.regime
+
+        if micro.regime == MicroRegime.TRENDING_DOWN:
+            if allowed == "short_only":
+                return self._evaluate_trend(price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, timeframe_label, MarketRegime.TRENDING_DOWN, assessment, short_only=True)
+            return self._no_signal(price, f"trending_down bias={micro.trend_bias:.2f} -- no longs")
+
+        if micro.regime == MicroRegime.TRENDING_UP:
+            return self._evaluate_trend(price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, timeframe_label, MarketRegime.TRENDING_UP, assessment, long_only=True)
+
+        if micro.regime == MicroRegime.MEAN_REVERTING:
+            if micro.trend_bias < -0.15:
+                return self._evaluate_mean_reversion(price, closes, rsi, rsi_prev, velocity, timeframe_label, regime, assessment, short_only=True)
+            if micro.trend_bias > 0.15:
+                return self._evaluate_mean_reversion(price, closes, rsi, rsi_prev, velocity, timeframe_label, regime, assessment, long_only=True)
             return self._evaluate_mean_reversion(price, closes, rsi, rsi_prev, velocity, timeframe_label, regime, assessment)
 
-        return self._evaluate_trend(price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, timeframe_label, regime, assessment)
+        return self._no_signal(price, f"micro={micro.regime.value} bias={micro.trend_bias:.2f}")
 
-    def _evaluate_trend(self, price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, tf_label, regime, assessment):
+    def _evaluate_trend(self, price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, tf_label, regime, assessment, long_only=False, short_only=False):
         now = time.time()
 
-        long_signal = ema_9 > ema_21 and rsi > rsi_prev and 40 < rsi < 65 and velocity > -0.1
-        short_signal = (
+        long_signal = not short_only and ema_9 > ema_21 and rsi > rsi_prev and 40 < rsi < 65 and velocity > -0.1
+        short_signal = not long_only and (
             ema_9 < ema_21 and rsi < rsi_prev and 35 < rsi < 60 and velocity < 0.1
-            and adx_val > 25
-            and regime == MarketRegime.TRENDING_DOWN
+            and adx_val > 20
         )
 
         if not long_signal and not short_signal:
@@ -251,7 +269,7 @@ class SignalEngine:
                 indicators={"rsi": rsi, "ema_9": ema_9, "ema_21": ema_21, "velocity": velocity, "adx": adx_val},
             )
 
-    def _evaluate_mean_reversion(self, price, closes, rsi, rsi_prev, velocity, tf_label, regime, assessment):
+    def _evaluate_mean_reversion(self, price, closes, rsi, rsi_prev, velocity, tf_label, regime, assessment, long_only=False, short_only=False):
         now = time.time()
         bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes)
         if bb_upper <= bb_lower:
@@ -266,8 +284,8 @@ class SignalEngine:
 
         extreme_long = bb_position < 0.05 and rsi < 30
         extreme_short = bb_position > 0.95 and rsi > 70
-        long_mr = (bb_position < self.MR_BB_ENTRY and rsi < self.MR_RSI_LONG_MAX) and (rsi > rsi_prev or extreme_long)
-        short_mr = (bb_position > (1 - self.MR_BB_ENTRY) and rsi > self.MR_RSI_SHORT_MIN) and (rsi < rsi_prev or extreme_short)
+        long_mr = not short_only and (bb_position < self.MR_BB_ENTRY and rsi < self.MR_RSI_LONG_MAX) and (rsi > rsi_prev or extreme_long)
+        short_mr = not long_only and (bb_position > (1 - self.MR_BB_ENTRY) and rsi > self.MR_RSI_SHORT_MIN) and (rsi < rsi_prev or extreme_short)
 
         if not long_mr and not short_mr:
             return self._no_signal(price, f"MR: BB={bb_position:.2f} RSI={rsi:.0f} width={bb_width:.3f}")
