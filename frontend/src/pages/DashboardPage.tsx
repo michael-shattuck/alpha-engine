@@ -28,26 +28,36 @@ export default function DashboardPage() {
   const sol = d.sol_price
   const ds = scalper.data?.daily_stats
   const activeTrades = scalper.data?.active_trades ?? []
-  const unrealizedPnl = activeTrades.reduce((sum: number, t: { pnl_usd?: number }) => sum + (t.pnl_usd ?? 0), 0)
-  const realizedPnl = ds?.daily_pnl_usd ?? 0
-  const totalPnl = realizedPnl + unrealizedPnl
+  const scalperUnrealized = activeTrades.reduce((sum: number, t: { pnl_usd?: number }) => sum + (t.pnl_usd ?? 0), 0)
+  const scalperRealized = ds?.daily_pnl_usd ?? 0
+  const scalperPnl = scalperRealized + scalperUnrealized
   const driftAcct = (scalper.data as any)?.drift_account
+
+  const lp = d.strategies['leveraged_lp']
+  const lpPositions = lp?.positions ?? []
+  const lpFees = lpPositions.reduce((sum: number, p: any) => sum + (p?.fees_earned_usd ?? 0), 0)
+  const lpValuePnl = lpPositions.reduce((sum: number, p: any) => sum + ((p?.current_value_usd ?? 0) - (p?.deposit_usd ?? 0)), 0)
+  const lpPnl = lpFees + lpValuePnl
+
+  const fundingArb = d.strategies['funding_arb']
+  const fundingPositions = fundingArb?.positions ?? []
+  const fundingPnl = fundingPositions.reduce((sum: number, p: any) => sum + (p?.fees_earned_usd ?? 0), 0)
+
+  const totalRealized = scalperRealized + lpFees + fundingPnl
+  const totalUnrealized = scalperUnrealized + lpValuePnl
+  const totalPnl = totalRealized + totalUnrealized
   const capital = driftAcct?.starting_capital ?? 199.04
 
   const uptimeHrs = Math.max(d.uptime_hours || 0.5, 0.5)
   const closedCount = (ds?.wins ?? 0) + (ds?.losses ?? 0)
-  const hasData = closedCount >= 2
+  const hasData = closedCount >= 2 || lpFees > 0
 
   const totalPerHour = hasData ? totalPnl / uptimeHrs : 0
-  const realizedPerHour = hasData ? realizedPnl / uptimeHrs : 0
-  const unrealizedPerHour = hasData ? unrealizedPnl / uptimeHrs : 0
 
-  const projDpy = totalPerHour * 24 / capital * 100
+  const projDpy = hasData ? totalPerHour * 24 / capital * 100 : 0
   const projMpy = projDpy * 30
   const projApy = projDpy * 365
 
-  const realDpy = realizedPerHour * 24 / capital * 100
-  const unrealDpy = unrealizedPerHour * 24 / capital * 100
 
   return (
     <div className="space-y-5">
@@ -60,10 +70,10 @@ export default function DashboardPage() {
           </Sub>
         </Card>
         <Card>
-          <Label>Session PnL</Label>
+          <Label>Session PnL (All)</Label>
           <Value color={totalPnl >= 0 ? 'green' : 'red'}>{fmt(totalPnl)}</Value>
           <Sub positive={totalPnl >= 0}>
-            realized: {fmt(realizedPnl)} | open: {fmt(unrealizedPnl)}
+            scalper: {fmt(scalperPnl)} | LP: {fmt(lpPnl)} | funding: {fmt(fundingPnl)}
           </Sub>
         </Card>
         <Card>
@@ -88,7 +98,7 @@ export default function DashboardPage() {
               {hasData ? `${projDpy >= 0 ? '+' : ''}${projDpy.toFixed(2)}%` : '--'}
             </div>
             {hasData && <div className="font-mono text-[10px] text-gray-600" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              r:{realDpy >= 0 ? '+' : ''}{realDpy.toFixed(1)}% u:{unrealDpy >= 0 ? '+' : ''}{unrealDpy.toFixed(1)}%
+              r:{(totalRealized / uptimeHrs * 24 / capital * 100).toFixed(1)}% u:{(totalUnrealized / uptimeHrs * 24 / capital * 100).toFixed(1)}%
             </div>}
           </div>
           <div>
