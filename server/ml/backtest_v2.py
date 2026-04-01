@@ -56,22 +56,35 @@ def aggregate_to_timeframe(candles_1m: list[dict], minutes: int) -> list[dict]:
     return result
 
 
+def compute_trend_bias(returns_5: list[float], ema_spread: float, di_spread: float) -> float:
+    mean_ret = sum(returns_5) / len(returns_5) if returns_5 else 0
+    bias = 0.0
+    if mean_ret > 0.0002 and ema_spread > 0:
+        bias = min(mean_ret * 10000 + ema_spread * 500, 1.0)
+    elif mean_ret < -0.0002 and ema_spread < 0:
+        bias = max(mean_ret * 10000 + ema_spread * 500, -1.0)
+    return bias
+
+
 def detect_regime(adx: float, plus_di: float, minus_di: float, bbw: float,
-                  ema_9: float, ema_21: float, cfg: StrategyConfig) -> str:
-    if adx >= cfg.adx_trend_threshold:
-        if plus_di > minus_di:
-            if ema_9 > 0 and ema_21 > 0 and ema_9 < ema_21:
-                return "volatile_ranging"
-            return "trending_up"
-        else:
-            if ema_9 > 0 and ema_21 > 0 and ema_9 > ema_21:
-                return "volatile_ranging"
-            return "trending_down"
-    if bbw < 0.02:
-        return "dead"
-    if bbw < 0.04:
-        return "ranging"
-    return "volatile_ranging"
+                  ema_9: float, ema_21: float, cfg: StrategyConfig,
+                  trend_bias: float = 0, realized_vol: float = 0) -> tuple[str, str]:
+    if realized_vol < 0.0005:
+        return "dead", "no_trade"
+    if realized_vol > 0.003:
+        return "volatile", "no_trade"
+
+    if trend_bias > 0.3 or (adx >= cfg.adx_trend_threshold and plus_di > minus_di and ema_9 > ema_21):
+        return "trending_up", "long_only"
+    if trend_bias < -0.3 or (adx >= cfg.adx_trend_threshold and minus_di > plus_di and ema_9 < ema_21):
+        return "trending_down", "short_only"
+
+    if trend_bias < -0.15:
+        return "mean_reverting", "short_bias"
+    if trend_bias > 0.15:
+        return "mean_reverting", "long_bias"
+
+    return "mean_reverting", "both"
 
 
 def run_backtest(asset: str, cfg: StrategyConfig = StrategyConfig(),
@@ -118,16 +131,13 @@ def run_backtest(asset: str, cfg: StrategyConfig = StrategyConfig(),
         velocity = ind.price_velocity(closes, 3)
         bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes)
 
-        regime = detect_regime(adx_val, plus_di, minus_di, bbw, ema_9, ema_21, cfg)
+        returns_5 = [(closes[j] - closes[j - 1]) / closes[j - 1] for j in range(max(1, len(closes) - 5), len(closes))]
+        realized_vol = (sum(r * r for r in returns_5) / len(returns_5)) ** 0.5 if returns_5 else 0
+        ema_spread = (ema_9 - ema_21) / ema_21 if ema_21 > 0 else 0
+        di_spread = (plus_di - minus_di) / max(plus_di + minus_di, 1)
+        trend_bias = compute_trend_bias(returns_5, ema_spread, di_spread)
 
-        sol_falling = False
-        if sol_15m and i < len(sol_15m):
-            sol_closes = [c["close"] for c in sol_15m[max(0, i - 10):i + 1]]
-            if len(sol_closes) >= 5:
-                sol_ema_9 = ind.ema(sol_closes, min(9, len(sol_closes)))
-                sol_ema_21 = ind.ema(sol_closes, min(21, len(sol_closes))) if len(sol_closes) >= 21 else sol_ema_9
-                sol_vel = ind.price_velocity(sol_closes, 3)
-                sol_falling = sol_ema_9 < sol_ema_21 and sol_vel < -0.1
+        regime, allowed = detect_regime(adx_val, plus_di, minus_di, bbw, ema_9, ema_21, cfg, trend_bias, realized_vol)
 
         if active:
             t = active
@@ -170,47 +180,44 @@ def run_backtest(asset: str, cfg: StrategyConfig = StrategyConfig(),
 
         signal_type = None
         signal_trade_type = None
-        signal_confidence = 0
+        tp_pct = 0
+        sl_pct = 0
 
-        if regime == "dead":
+        if allowed == "no_trade":
             continue
 
-        if regime in ("ranging", "volatile_ranging"):
+        can_long = allowed in ("long_only", "long_bias", "both")
+        can_short = allowed in ("short_only", "short_bias", "both")
+
+        if regime == "mean_reverting":
             bb_pos = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper > bb_lower else 0.5
             extreme_long = bb_pos < 0.05 and rsi < 30
             extreme_short = bb_pos > 0.95 and rsi > 70
 
-            long_mr = (bb_pos < cfg.mr_bb_entry and rsi < cfg.mr_rsi_long_max) and (rsi > rsi_prev or extreme_long)
-            short_mr = (bb_pos > (1 - cfg.mr_bb_entry) and rsi > cfg.mr_rsi_short_min) and (rsi < rsi_prev or extreme_short)
+            long_mr = can_long and (bb_pos < cfg.mr_bb_entry and rsi < cfg.mr_rsi_long_max) and (rsi > rsi_prev or extreme_long)
+            short_mr = can_short and (bb_pos > (1 - cfg.mr_bb_entry) and rsi > cfg.mr_rsi_short_min) and (rsi < rsi_prev or extreme_short)
 
-            if long_mr and not (cfg.sol_trend_filter and sol_falling):
-                if regime == "trending_down":
-                    pass
-                else:
-                    signal_type = "long"
-                    signal_trade_type = "mean_reversion"
-                    tp_pct = cfg.mr_tp
-                    sl_pct = cfg.mr_sl
-
-            if short_mr and (signal_type is None or rsi > 60):
+            if short_mr and (not long_mr or rsi > 60):
                 signal_type = "short"
                 signal_trade_type = "mean_reversion"
                 tp_pct = cfg.mr_tp
                 sl_pct = cfg.mr_sl
+            elif long_mr:
+                signal_type = "long"
+                signal_trade_type = "mean_reversion"
+                tp_pct = cfg.mr_tp
+                sl_pct = cfg.mr_sl
 
-        else:
-            long_trend = ema_9 > ema_21 and rsi > rsi_prev and cfg.trend_rsi_long_min < rsi < cfg.trend_rsi_long_max and velocity > cfg.trend_velocity_min
-            short_trend = (ema_9 < ema_21 and rsi < rsi_prev and cfg.trend_rsi_short_min < rsi < cfg.trend_rsi_short_max
-                           and velocity < -cfg.trend_velocity_min and adx_val > cfg.adx_short_min
-                           and regime == "trending_down")
+        elif regime in ("trending_up", "trending_down"):
+            long_trend = can_long and ema_9 > ema_21 and rsi > rsi_prev and cfg.trend_rsi_long_min < rsi < cfg.trend_rsi_long_max and velocity > cfg.trend_velocity_min
+            short_trend = can_short and ema_9 < ema_21 and rsi < rsi_prev and cfg.trend_rsi_short_min < rsi < cfg.trend_rsi_short_max and velocity < -cfg.trend_velocity_min
 
-            if long_trend and not (cfg.sol_trend_filter and sol_falling):
+            if long_trend and regime == "trending_up":
                 signal_type = "long"
                 signal_trade_type = "trend_follow"
                 tp_pct = cfg.trend_tp
                 sl_pct = cfg.trend_sl
-
-            elif short_trend:
+            elif short_trend and regime == "trending_down":
                 signal_type = "short"
                 signal_trade_type = "trend_follow"
                 tp_pct = cfg.trend_tp
