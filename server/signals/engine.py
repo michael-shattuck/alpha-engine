@@ -203,6 +203,15 @@ class SignalEngine:
         if ready_count < 3:
             return self._no_signal(price, "warmup")
 
+        d1_closes = self.candles.get_closes(Timeframe.D1, 30)
+        d1_bearish = False
+        d1_bullish = False
+        if len(d1_closes) >= 9:
+            d1_e9 = ind.ema(d1_closes, min(9, len(d1_closes)))
+            d1_e21 = ind.ema(d1_closes, min(21, len(d1_closes)))
+            d1_bearish = d1_e9 < d1_e21 or d1_closes[-1] < d1_e9
+            d1_bullish = d1_e9 > d1_e21 and d1_closes[-1] > d1_e9
+
         tf_total = sum(tf_scores.values())
 
         ml_direction = 0
@@ -250,6 +259,8 @@ class SignalEngine:
         reason_str = f"combined={combined:.2f} tf={tf_total:.2f}{ml_tag} " + ", ".join(reasons[:4])
 
         if combined > acfg["thresh"]:
+            if d1_bearish:
+                return self._no_signal(price, f"{reason_str} BLOCKED D1 bearish -- no longs")
             if has_ml and ml_bearish:
                 return self._no_signal(price, f"{reason_str} BLOCKED ML disagrees (bearish)")
             if not tf_bullish and not ml_bullish:
@@ -270,6 +281,8 @@ class SignalEngine:
             )
 
         if combined < -acfg["thresh"]:
+            if d1_bullish:
+                return self._no_signal(price, f"{reason_str} BLOCKED D1 bullish -- no shorts")
             if has_ml and ml_bullish:
                 return self._no_signal(price, f"{reason_str} BLOCKED ML disagrees (bullish)")
             if not tf_bearish and not ml_bearish:
