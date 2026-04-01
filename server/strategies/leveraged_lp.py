@@ -247,7 +247,8 @@ class LeveragedLPStrategy(BaseStrategy):
             equity = position.metadata.get("equity", self.capital_allocated)
             borrowed = position.metadata.get("borrowed_usd", 0)
             net = position.current_value_usd + position.fees_earned_usd - borrowed
-            if borrowed > 0 and net / borrowed < 0.2:
+            health = net / borrowed if borrowed > 0 else 999
+            if borrowed > 0 and health < 1.3:
                 return {
                     "action": "deleverage",
                     "position_id": position.id,
