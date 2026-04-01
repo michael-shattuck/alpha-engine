@@ -134,6 +134,48 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {hasData && (() => {
+        const monthlyRunRate = projMpy
+        const floorTarget = 30
+        const aboveFloor = monthlyRunRate >= floorTarget
+        const barWidth = Math.min(Math.max(monthlyRunRate / (floorTarget * 2) * 100, 0), 100)
+        const targetPos = floorTarget / (floorTarget * 2) * 100
+        return (
+          <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">Monthly Run Rate vs 30% Floor Target</div>
+              <div className={`font-mono text-sm font-bold ${aboveFloor ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {monthlyRunRate >= 0 ? '+' : ''}{monthlyRunRate.toFixed(1)}% MPY
+              </div>
+            </div>
+            <div className="h-3 rounded-full bg-gray-800 overflow-hidden relative">
+              <div className="absolute top-0 h-full w-px bg-yellow-400 z-10" style={{ left: `${targetPos}%` }} />
+              <div className={`h-full rounded-full transition-all ${aboveFloor ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${barWidth}%` }} />
+            </div>
+            <div className="flex justify-between text-[10px] mt-1">
+              <span className="text-gray-600">0%</span>
+              <span className="text-yellow-400">30% floor</span>
+              <span className="text-gray-600">60%+</span>
+            </div>
+          </div>
+        )
+      })()}
+
+      {((scalper.data as any)?.asset_regimes && Object.keys((scalper.data as any).asset_regimes).length > 0) && (
+        <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Asset Regimes</div>
+          <div className="flex flex-wrap gap-1">
+            {Object.entries((scalper.data as any).asset_regimes as Record<string, {regime: string}>).map(([asset, data]) => (
+              <span key={asset} className={`rounded px-2 py-0.5 text-[10px] font-mono ${
+                REGIME_COLORS[data.regime]?.replace('text-', 'bg-').replace('400', '500/15') ?? 'bg-gray-500/15'
+              } ${REGIME_COLORS[data.regime] ?? 'text-gray-400'}`}>
+                {asset}: {REGIME_LABELS[data.regime]?.split(' ')[0] ?? data.regime}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
         <h2 className="mb-3 text-sm font-medium tracking-wide text-gray-400 uppercase">Active Strategies</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

@@ -546,7 +546,21 @@ class VolatilityScalper(BaseStrategy):
 
     def _calculate_position_size(self, signal: TradeSignal) -> float:
         base_capital = max(self.capital_allocated, 1.0)
-        base = base_capital * self.POSITION_SIZE_PCT
+
+        profile = self.learner.get_profile(signal.asset)
+        if profile.trades >= 10 and profile.win_rate > 0.45:
+            avg_win = abs(profile.avg_win_pct) / 100 if profile.avg_win_pct else 0.02
+            avg_loss = abs(profile.avg_loss_pct) / 100 if profile.avg_loss_pct else 0.015
+            wr = profile.win_rate
+            if avg_loss > 0:
+                kelly = wr - (1 - wr) / (avg_win / avg_loss)
+                kelly = max(0.02, min(kelly * 0.5, 0.15))
+            else:
+                kelly = self.POSITION_SIZE_PCT
+        else:
+            kelly = self.POSITION_SIZE_PCT
+
+        base = base_capital * kelly
 
         active_usd = sum(t["collateral_usd"] for t in self._active_trades if t["status"] == "active")
         available = base_capital - active_usd
