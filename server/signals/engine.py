@@ -635,17 +635,18 @@ class SignalEngine:
             if current_price >= trail_stop:
                 return self._exit_signal(current_price, SignalType.CLOSE_SHORT, f"trailing_stop (trough=${peak:.4f})")
 
-        assessment = self.regime_detector._last_assessment
-        if assessment:
-            regime = assessment.regime
-            if regime == MarketRegime.DEAD:
-                close_type = SignalType.CLOSE_LONG if direction == "long" else SignalType.CLOSE_SHORT
-                return self._exit_signal(current_price, close_type, "regime_changed_to_dead")
-            if trade_type == "mean_reversion":
-                if direction == "long" and regime == MarketRegime.TRENDING_DOWN:
-                    return self._exit_signal(current_price, SignalType.CLOSE_LONG, "regime_now_trending_down")
-                if direction == "short" and regime == MarketRegime.TRENDING_UP:
-                    return self._exit_signal(current_price, SignalType.CLOSE_SHORT, "regime_now_trending_up")
+        if trade_type != "multi_tf":
+            assessment = self.regime_detector._last_assessment
+            if assessment:
+                regime = assessment.regime
+                if regime == MarketRegime.DEAD:
+                    close_type = SignalType.CLOSE_LONG if direction == "long" else SignalType.CLOSE_SHORT
+                    return self._exit_signal(current_price, close_type, "regime_changed_to_dead")
+                if trade_type == "mean_reversion":
+                    if direction == "long" and regime == MarketRegime.TRENDING_DOWN:
+                        return self._exit_signal(current_price, SignalType.CLOSE_LONG, "regime_now_trending_down")
+                    if direction == "short" and regime == MarketRegime.TRENDING_UP:
+                        return self._exit_signal(current_price, SignalType.CLOSE_SHORT, "regime_now_trending_up")
 
         age = now - opened_at
         if trade_type == "multi_tf":
