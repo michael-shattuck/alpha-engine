@@ -47,7 +47,7 @@ class VolatilityScalper(BaseStrategy):
         self._daily_losses: int = 0
         self._last_trade_time: float = 0.0
         self._daily_reset_time: float = 0.0
-        self.trading_blocked: bool = True
+        self.trading_blocked: bool = False
 
     async def init_executors(self):
         if self.mode == "live" and not self.drift:
