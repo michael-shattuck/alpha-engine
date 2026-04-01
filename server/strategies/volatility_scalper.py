@@ -140,7 +140,7 @@ class VolatilityScalper(BaseStrategy):
                 if r.status_code != 200:
                     return
                 feeds = r.json()
-                fid_to_asset = {fid.lstrip("0x"): a for a, fid in non_sol.items()}
+                fid_to_asset = {fid.removeprefix("0x"): a for a, fid in non_sol.items()}
                 for feed in feeds:
                     fid = feed.get("id", "")
                     asset = fid_to_asset.get(fid)
