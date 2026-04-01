@@ -50,7 +50,7 @@ export default function DashboardPage() {
 
   const uptimeHrs = Math.max(d.uptime_hours || 0.5, 0.5)
   const closedCount = (ds?.wins ?? 0) + (ds?.losses ?? 0)
-  const hasData = closedCount >= 2 || lpFees > 0
+  const hasData = closedCount >= 1 || lpFees > 0 || Math.abs(totalPnl) > 0.001
 
   const totalPerHour = hasData ? totalPnl / uptimeHrs : 0
 
