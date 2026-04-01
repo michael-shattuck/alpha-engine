@@ -55,11 +55,6 @@ class DriftExecutor:
         if self._started:
             return
 
-        if self.paper_mode:
-            self._started = True
-            log.info("Drift executor started (paper mode)")
-            return
-
         connection = AsyncClient(HELIUS_RPC_URL or SOLANA_RPC_URL, commitment=Confirmed)
         keypair = Keypair.from_bytes(base58.b58decode(WALLET_PRIVATE_KEY))
 
@@ -68,10 +63,12 @@ class DriftExecutor:
             await self.client.subscribe()
             self.user = self.client.get_user()
             self._started = True
-            log.info("Drift executor started (live)")
+            mode_label = "paper" if self.paper_mode else "live"
+            log.info(f"Drift executor started ({mode_label}, oracle connected)")
         except Exception as e:
             log.error(f"Drift init failed: {e}")
             self.client = None
+            self._started = True
 
     async def stop(self):
         if self.client:

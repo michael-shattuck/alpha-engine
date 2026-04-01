@@ -66,8 +66,9 @@ class VolatilityScalper(BaseStrategy):
 
         SignalEngine.load_ml_models()
 
-        if self.mode == "live":
-            await self.init_executors()
+        if not self.drift:
+            self.drift = DriftExecutor(paper_mode=(self.mode != "live"))
+        await self.drift.start()
 
         await self._fetch_asset_prices()
         for asset in TRACKED_ASSETS:
@@ -171,7 +172,7 @@ class VolatilityScalper(BaseStrategy):
 
         self._asset_prices["SOL"] = sol_price
         if now - getattr(self, '_last_price_fetch', 0) > 10:
-            if self.mode == "live" and self.drift and self.drift.client:
+            if self.drift and self.drift.client:
                 drift_prices = self.drift.get_oracle_prices()
                 if drift_prices:
                     self._asset_prices.update(drift_prices)
