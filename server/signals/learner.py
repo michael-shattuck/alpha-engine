@@ -5,11 +5,14 @@ from dataclasses import dataclass, field, asdict
 
 log = logging.getLogger("learner")
 
-DECAY_RATE = 0.95
+DECAY_RATE = 0.90
 REGRET_LOOKBACK = 900
-MIN_TRADES_FOR_ADAPTATION = 3
-MAX_PAIN = 3.0
-MAX_REGRET = 3.0
+MIN_TRADES_FOR_ADAPTATION = 5
+MAX_PAIN = 2.0
+MAX_REGRET = 2.0
+PAIN_STALE_SECONDS = 3600
+MAX_CONFIDENCE_RAISE = 0.08
+MIN_SIZE_MULTIPLIER = 0.6
 
 
 @dataclass
@@ -235,17 +238,21 @@ class TradeLearner:
         if p.trades < MIN_TRADES_FOR_ADAPTATION:
             return
 
-        p.confidence_adjustment = (p.pain * 0.05) - (p.regret * 0.03)
-        p.confidence_adjustment = max(-0.15, min(p.confidence_adjustment, 0.15))
+        now = time.time()
+        if now - p.last_updated > PAIN_STALE_SECONDS and p.pain > 0:
+            p.pain *= 0.5
+
+        p.confidence_adjustment = (p.pain * 0.04) - (p.regret * 0.03)
+        p.confidence_adjustment = max(-0.10, min(p.confidence_adjustment, MAX_CONFIDENCE_RAISE))
 
         if p.consecutive_losses >= 3:
-            p.size_multiplier = 0.5
+            p.size_multiplier = MIN_SIZE_MULTIPLIER
         elif p.consecutive_losses >= 2:
-            p.size_multiplier = 0.7
+            p.size_multiplier = 0.75
         elif p.consecutive_wins >= 3:
             p.size_multiplier = min(1.3, 1.0 + p.consecutive_wins * 0.1)
         else:
-            p.size_multiplier = max(0.7, min(1.2, 1.0 - (p.pain * 0.1) + (p.regret * 0.05)))
+            p.size_multiplier = max(MIN_SIZE_MULTIPLIER, min(1.2, 1.0 - (p.pain * 0.08) + (p.regret * 0.05)))
 
         if p.near_tp_misses >= 3 and p.tp_hits < p.near_tp_misses:
             p.tp_multiplier = 0.85
@@ -260,10 +267,10 @@ class TradeLearner:
             p.sl_multiplier = 1.0
 
         short_total = p.short_wins + p.short_losses
-        if short_total >= 3 and p.short_wr < 0.3:
-            p.short_penalty = 0.3
+        if short_total >= 5 and p.short_wr < 0.25:
+            p.short_penalty = 0.15
         elif short_total >= 5 and p.short_wr < 0.4:
-            p.short_penalty = 0.2
+            p.short_penalty = 0.10
         else:
             p.short_penalty = 0.0
 
