@@ -426,7 +426,9 @@ class VolatilityScalper(BaseStrategy):
         else:
             self._daily_losses += 1
 
-        self.signal_engine.record_close(not was_win)
+        asset = trade.get("asset", "SOL")
+        engine = self.engines.get(asset, self.signal_engine)
+        engine.record_close(not was_win)
 
         trade["exit_price"] = exit_price
         trade["exit_reason"] = reason

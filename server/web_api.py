@@ -107,6 +107,10 @@ async def update_allocation(req: AllocationRequest):
 
 @app.get("/api/history")
 async def get_history(limit: int = 1000):
+    from server.config import DATABASE_URL
+    if DATABASE_URL:
+        from server.persistence import TradeStore
+        return TradeStore.get_recent(limit=limit)
     history = orchestrator.state.portfolio.history
     return history[-limit:]
 
