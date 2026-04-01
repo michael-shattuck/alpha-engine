@@ -42,8 +42,9 @@ DEFAULT_MODE = "paper"
 
 DEFAULT_CAPITAL_ALLOCATION = {
     "leveraged_lp": 0.30,
-    "volatility_scalper": 0.50,
+    "volatility_scalper": 0.40,
     "funding_arb": 0.20,
+    "jlp": 0.10,
 }
 
 RISK_LIMITS = {

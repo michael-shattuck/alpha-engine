@@ -15,6 +15,7 @@ from server.strategies.leveraged_lp import LeveragedLPStrategy
 from server.strategies.volatile_pairs import VolatilePairsStrategy
 from server.strategies.adaptive_range import AdaptiveRangeStrategy
 from server.strategies.funding_arb import FundingArbStrategy
+from server.strategies.jlp import JLPStrategy
 from server.strategies.volatility_scalper import VolatilityScalper
 from server.alerts import alerts
 
@@ -35,6 +36,7 @@ async def lifespan(app: FastAPI):
     orchestrator.register_strategy(LeveragedLPStrategy(mode=mode))
     orchestrator.register_strategy(VolatilityScalper(mode=mode))
     orchestrator.register_strategy(FundingArbStrategy(mode=mode))
+    orchestrator.register_strategy(JLPStrategy(mode=mode))
     orchestrator.register_strategy(VolatilePairsStrategy(mode=mode), dormant=True)
     orchestrator.register_strategy(AdaptiveRangeStrategy(mode=mode), dormant=True)
 
