@@ -57,7 +57,7 @@ class SignalEngine:
     MOM_VELOCITY_MIN = 0.4
     MOM_TP_PCT = 0.015
     MOM_SL_PCT = 0.005
-    MOM_TRAILING_STOP_PCT = 0.015
+    MOM_TRAILING_STOP_PCT = 0.005
     MOM_MAX_HOLD = 5400
 
     COOLDOWN_AFTER_CLOSE = 60
@@ -146,13 +146,19 @@ class SignalEngine:
         c = self.candles.get_current(Timeframe.M1)
         return c.close if c else 0
 
-    TREND_TP_PCT = 0.01
-    TREND_SL_PCT = 0.007
-    TREND_MAX_HOLD = 2700
+    TP_PCT = 0.0
+    SL_PCT = 0.004
+    MAX_HOLD = 5400
 
-    MR_BB_ENTRY = 0.20
-    MR_RSI_LONG_MAX = 45
-    MR_RSI_SHORT_MIN = 55
+    TF_WEIGHTS = {
+        Timeframe.H1: 0.30,
+        Timeframe.M15: 0.25,
+        Timeframe.M5: 0.25,
+        Timeframe.M1: 0.20,
+    }
+
+    LONG_THRESHOLD = 0.30
+    SHORT_THRESHOLD = -0.30
 
     def evaluate(self, current_price: float = 0) -> TradeSignal:
         now = time.time()
@@ -160,59 +166,121 @@ class SignalEngine:
         if price <= 0:
             return self._no_signal(price)
 
-        closes_15m = self.candles.get_closes(Timeframe.M15, 30)
-        if len(closes_15m) < 22:
-            closes_5m = self.candles.get_closes(Timeframe.M5, 30)
-            if len(closes_5m) < 22:
-                return self._no_signal(price, "warmup (need 22 candles)")
-            closes = closes_5m
-            timeframe_label = "5m"
-        else:
-            closes = closes_15m
-            timeframe_label = "15m"
-
         cooldown = self.COOLDOWN_AFTER_LOSS if self._last_close_was_loss else self.COOLDOWN_AFTER_CLOSE
         if now - self._last_close_time < cooldown:
             return self._no_signal(price, "cooldown")
 
-        assessment = self.regime_detector.assess(self.candles)
-        micro = self.micro_regime.assess(self.candles)
+        tf_scores = {}
+        tf_details = {}
+        ready_count = 0
 
-        if micro.regime == MicroRegime.DEAD:
-            return self._no_signal(price, "dead market")
-        if micro.regime == MicroRegime.VOLATILE:
-            return self._no_signal(price, f"volatile (vol={micro.volatility_rank:.2f}) -- sitting out")
+        for tf, weight in self.TF_WEIGHTS.items():
+            closes = self.candles.get_closes(tf, 30)
+            highs = self.candles.get_highs(tf, 30)
+            lows = self.candles.get_lows(tf, 30)
+
+            if len(closes) < 15:
+                tf_scores[tf] = 0
+                tf_details[tf] = "insufficient"
+                continue
+
+            ready_count += 1
+            score, detail = self._score_timeframe(closes, highs, lows, price)
+            tf_scores[tf] = score * weight
+            tf_details[tf] = detail
+
+        if ready_count < 2:
+            return self._no_signal(price, "warmup")
+
+        total_score = sum(tf_scores.values())
+
+        reasons = []
+        for tf in [Timeframe.H1, Timeframe.M15, Timeframe.M5, Timeframe.M1]:
+            if tf in tf_details and tf_details[tf] != "insufficient":
+                reasons.append(f"{tf.value}:{tf_details[tf]}")
+
+        if total_score > self.LONG_THRESHOLD:
+            confidence = min(0.5 + total_score, 0.95)
+            tp = price * 1.50 if self.TP_PCT == 0 else price * (1 + self.TP_PCT)
+            return TradeSignal(
+                type=SignalType.LONG, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 - self.SL_PCT),
+                take_profit=tp,
+                regime="multi_tf", trade_type="multi_tf",
+                reason=f"score={total_score:.2f} " + ", ".join(reasons), timestamp=now,
+                indicators={"score": total_score, **{f"{tf.value}_score": s for tf, s in tf_scores.items()}},
+            )
+
+        if total_score < self.SHORT_THRESHOLD:
+            confidence = min(0.5 + abs(total_score), 0.95)
+            tp = price * 0.50 if self.TP_PCT == 0 else price * (1 - self.TP_PCT)
+            return TradeSignal(
+                type=SignalType.SHORT, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 + self.SL_PCT),
+                take_profit=tp,
+                regime="multi_tf", trade_type="multi_tf",
+                reason=f"score={total_score:.2f} " + ", ".join(reasons), timestamp=now,
+                indicators={"score": total_score, **{f"{tf.value}_score": s for tf, s in tf_scores.items()}},
+            )
+
+        return self._no_signal(price, f"score={total_score:.2f} " + ", ".join(reasons))
+
+    def _score_timeframe(self, closes: list[float], highs: list[float], lows: list[float], price: float) -> tuple[float, str]:
+        score = 0.0
+        signals = []
 
         rsi = ind.rsi(closes)
-        rsi_prev = ind.rsi(closes[:-1]) if len(closes) > 16 else rsi
+        rsi_prev = ind.rsi(closes[:-1]) if len(closes) > 15 else rsi
         ema_9 = ind.ema(closes, 9)
         ema_21 = ind.ema(closes, 21)
         velocity = ind.price_velocity(closes, 3)
+        bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes)
+        bb_pos = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper > bb_lower else 0.5
 
-        highs_1h = self.candles.get_highs(Timeframe.H1, 30)
-        lows_1h = self.candles.get_lows(Timeframe.H1, 30)
-        closes_1h = self.candles.get_closes(Timeframe.H1, 30)
-        adx_val = ind.adx(highs_1h, lows_1h, closes_1h) if len(closes_1h) >= 14 else 0
+        if ema_9 > ema_21:
+            score += 0.3
+            signals.append("ema+")
+        elif ema_9 < ema_21:
+            score -= 0.3
+            signals.append("ema-")
 
-        allowed = micro.allowed_actions
-        regime = assessment.regime
+        if rsi > 50 and rsi < 70 and rsi > rsi_prev:
+            score += 0.2
+            signals.append(f"rsi{rsi:.0f}+")
+        elif rsi < 50 and rsi > 30 and rsi < rsi_prev:
+            score -= 0.2
+            signals.append(f"rsi{rsi:.0f}-")
+        elif rsi >= 70:
+            score -= 0.3
+            signals.append(f"rsi{rsi:.0f}ob")
+        elif rsi <= 30:
+            score += 0.3
+            signals.append(f"rsi{rsi:.0f}os")
 
-        if micro.regime == MicroRegime.TRENDING_DOWN:
-            if allowed == "short_only":
-                return self._evaluate_trend(price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, timeframe_label, MarketRegime.TRENDING_DOWN, assessment, short_only=True)
-            return self._no_signal(price, f"trending_down bias={micro.trend_bias:.2f} -- no longs")
+        if velocity > 0.1:
+            score += 0.2
+            signals.append(f"v+{velocity:.1f}")
+        elif velocity < -0.1:
+            score -= 0.2
+            signals.append(f"v{velocity:.1f}")
 
-        if micro.regime == MicroRegime.TRENDING_UP:
-            return self._evaluate_trend(price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, timeframe_label, MarketRegime.TRENDING_UP, assessment, long_only=True)
+        if bb_pos < 0.15:
+            score += 0.3
+            signals.append(f"bb{bb_pos:.2f}")
+        elif bb_pos > 0.85:
+            score -= 0.3
+            signals.append(f"bb{bb_pos:.2f}")
 
-        if micro.regime == MicroRegime.MEAN_REVERTING:
-            if micro.trend_bias < -0.15:
-                return self._evaluate_mean_reversion(price, closes, rsi, rsi_prev, velocity, timeframe_label, regime, assessment, short_only=True)
-            if micro.trend_bias > 0.15:
-                return self._evaluate_mean_reversion(price, closes, rsi, rsi_prev, velocity, timeframe_label, regime, assessment, long_only=True)
-            return self._evaluate_mean_reversion(price, closes, rsi, rsi_prev, velocity, timeframe_label, regime, assessment)
+        if len(closes) >= 3:
+            recent_move = (closes[-1] - closes[-3]) / closes[-3]
+            if recent_move > 0.002:
+                score += 0.15
+            elif recent_move < -0.002:
+                score -= 0.15
 
-        return self._no_signal(price, f"micro={micro.regime.value} bias={micro.trend_bias:.2f}")
+        return score, "".join(signals)
 
     def _evaluate_trend(self, price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, tf_label, regime, assessment, long_only=False, short_only=False):
         now = time.time()
@@ -577,10 +645,12 @@ class SignalEngine:
                     return self._exit_signal(current_price, SignalType.CLOSE_SHORT, "regime_now_trending_up")
 
         age = now - opened_at
-        if trade_type == "mean_reversion":
+        if trade_type == "multi_tf":
+            max_hold = self.MAX_HOLD
+        elif trade_type == "mean_reversion":
             max_hold = self.AMR_MAX_HOLD if self.regime_detector.regime == MarketRegime.VOLATILE_RANGING else self.MR_MAX_HOLD
         elif trade_type == "trend_follow":
-            max_hold = self.TREND_MAX_HOLD
+            max_hold = self.MAX_HOLD
         else:
             max_hold = self.MOM_MAX_HOLD
         if age > max_hold:
