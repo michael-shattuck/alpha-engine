@@ -148,9 +148,9 @@ class SignalEngine:
     TREND_SL_PCT = 0.007
     TREND_MAX_HOLD = 2700
 
-    MR_BB_ENTRY = 0.03
-    MR_RSI_LONG_MAX = 35
-    MR_RSI_SHORT_MIN = 65
+    MR_BB_ENTRY = 0.20
+    MR_RSI_LONG_MAX = 45
+    MR_RSI_SHORT_MIN = 55
 
     def evaluate(self, current_price: float = 0) -> TradeSignal:
         now = time.time()
@@ -198,9 +198,9 @@ class SignalEngine:
     def _evaluate_trend(self, price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, tf_label, regime, assessment):
         now = time.time()
 
-        long_signal = ema_9 > ema_21 and rsi > rsi_prev and 40 < rsi < 65 and velocity > 0.1
+        long_signal = ema_9 > ema_21 and rsi > rsi_prev and 40 < rsi < 65 and velocity > -0.1
         short_signal = (
-            ema_9 < ema_21 and rsi < rsi_prev and 35 < rsi < 60 and velocity < -0.1
+            ema_9 < ema_21 and rsi < rsi_prev and 35 < rsi < 60 and velocity < 0.1
             and adx_val > 25
             and regime == MarketRegime.TRENDING_DOWN
         )
@@ -264,8 +264,10 @@ class SignalEngine:
         tp = self.AMR_TP_PCT if aggressive else self.MR_TP_PCT
         sl = self.AMR_SL_PCT if aggressive else self.MR_SL_PCT
 
-        long_mr = bb_position < self.MR_BB_ENTRY and rsi < self.MR_RSI_LONG_MAX and rsi > rsi_prev
-        short_mr = bb_position > (1 - self.MR_BB_ENTRY) and rsi > self.MR_RSI_SHORT_MIN and rsi < rsi_prev
+        extreme_long = bb_position < 0.05 and rsi < 30
+        extreme_short = bb_position > 0.95 and rsi > 70
+        long_mr = (bb_position < self.MR_BB_ENTRY and rsi < self.MR_RSI_LONG_MAX) and (rsi > rsi_prev or extreme_long)
+        short_mr = (bb_position > (1 - self.MR_BB_ENTRY) and rsi > self.MR_RSI_SHORT_MIN) and (rsi < rsi_prev or extreme_short)
 
         if not long_mr and not short_mr:
             return self._no_signal(price, f"MR: BB={bb_position:.2f} RSI={rsi:.0f} width={bb_width:.3f}")
