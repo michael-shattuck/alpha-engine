@@ -57,7 +57,7 @@ class SignalEngine:
     MOM_VELOCITY_MIN = 0.4
     MOM_TP_PCT = 0.015
     MOM_SL_PCT = 0.005
-    MOM_TRAILING_STOP_PCT = 0.006
+    MOM_TRAILING_STOP_PCT = 0.015
     MOM_MAX_HOLD = 5400
 
     COOLDOWN_AFTER_CLOSE = 60
@@ -146,9 +146,12 @@ class SignalEngine:
         c = self.candles.get_current(Timeframe.M1)
         return c.close if c else 0
 
-    TP_PCT = 0.0
-    SL_PCT = 0.005
-    MAX_HOLD = 5400
+    ASSET_CONFIGS = {
+        "JUP":  {"sl": 0.010, "trail": 0.015, "hold": 5400, "thresh": 0.55},
+        "JTO":  {"sl": 0.010, "trail": 0.015, "hold": 2700, "thresh": 0.35},
+        "PYTH": {"sl": 0.005, "trail": 0.015, "hold": 3600, "thresh": 0.55},
+    }
+    DEFAULT_CONFIG = {"sl": 0.007, "trail": 0.015, "hold": 3600, "thresh": 0.50}
 
     TF_WEIGHTS = {
         Timeframe.H1: 0.30,
@@ -156,9 +159,6 @@ class SignalEngine:
         Timeframe.M5: 0.25,
         Timeframe.M1: 0.20,
     }
-
-    LONG_THRESHOLD = 0.50
-    SHORT_THRESHOLD = -0.50
 
     def evaluate(self, current_price: float = 0) -> TradeSignal:
         now = time.time()
@@ -169,6 +169,8 @@ class SignalEngine:
         cooldown = self.COOLDOWN_AFTER_LOSS if self._last_close_was_loss else self.COOLDOWN_AFTER_CLOSE
         if now - self._last_close_time < cooldown:
             return self._no_signal(price, "cooldown")
+
+        acfg = self.ASSET_CONFIGS.get(self.asset, self.DEFAULT_CONFIG)
 
         tf_scores = {}
         tf_details = {}
@@ -199,27 +201,25 @@ class SignalEngine:
             if tf in tf_details and tf_details[tf] != "insufficient":
                 reasons.append(f"{tf.value}:{tf_details[tf]}")
 
-        if total_score > self.LONG_THRESHOLD:
+        if total_score > acfg["thresh"]:
             confidence = min(0.5 + total_score, 0.95)
-            tp = price * 1.50 if self.TP_PCT == 0 else price * (1 + self.TP_PCT)
             return TradeSignal(
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
                 entry_price=price,
-                stop_loss=price * (1 - self.SL_PCT),
-                take_profit=tp,
+                stop_loss=price * (1 - acfg["sl"]),
+                take_profit=price * 1.50,
                 regime="multi_tf", trade_type="multi_tf",
                 reason=f"score={total_score:.2f} " + ", ".join(reasons), timestamp=now,
                 indicators={"score": total_score, **{f"{tf.value}_score": s for tf, s in tf_scores.items()}},
             )
 
-        if total_score < self.SHORT_THRESHOLD:
+        if total_score < -acfg["thresh"]:
             confidence = min(0.5 + abs(total_score), 0.95)
-            tp = price * 0.50 if self.TP_PCT == 0 else price * (1 - self.TP_PCT)
             return TradeSignal(
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
                 entry_price=price,
-                stop_loss=price * (1 + self.SL_PCT),
-                take_profit=tp,
+                stop_loss=price * (1 + acfg["sl"]),
+                take_profit=price * 0.50,
                 regime="multi_tf", trade_type="multi_tf",
                 reason=f"score={total_score:.2f} " + ", ".join(reasons), timestamp=now,
                 indicators={"score": total_score, **{f"{tf.value}_score": s for tf, s in tf_scores.items()}},
@@ -623,12 +623,15 @@ class SignalEngine:
         if direction == "short" and current_price <= tp:
             return self._exit_signal(current_price, SignalType.CLOSE_SHORT, "take_profit_hit")
 
+        acfg = self.ASSET_CONFIGS.get(self.asset, self.DEFAULT_CONFIG)
+        trail_pct = acfg["trail"]
+
         if direction == "long" and peak > entry:
-            trail_stop = peak * (1 - self.MOM_TRAILING_STOP_PCT)
+            trail_stop = peak * (1 - trail_pct)
             if current_price <= trail_stop:
                 return self._exit_signal(current_price, SignalType.CLOSE_LONG, f"trailing_stop (peak=${peak:.4f})")
         if direction == "short" and peak < entry:
-            trail_stop = peak * (1 + self.MOM_TRAILING_STOP_PCT)
+            trail_stop = peak * (1 + trail_pct)
             if current_price >= trail_stop:
                 return self._exit_signal(current_price, SignalType.CLOSE_SHORT, f"trailing_stop (trough=${peak:.4f})")
 
@@ -646,7 +649,7 @@ class SignalEngine:
 
         age = now - opened_at
         if trade_type == "multi_tf":
-            max_hold = self.MAX_HOLD
+            max_hold = acfg["hold"]
         elif trade_type == "mean_reversion":
             max_hold = self.AMR_MAX_HOLD if self.regime_detector.regime == MarketRegime.VOLATILE_RANGING else self.MR_MAX_HOLD
         elif trade_type == "trend_follow":
@@ -660,15 +663,17 @@ class SignalEngine:
         return None
 
     def update_trailing_stop(self, position: dict, current_price: float) -> float | None:
+        acfg = self.ASSET_CONFIGS.get(self.asset, self.DEFAULT_CONFIG)
+        trail_pct = acfg["trail"]
         direction = position["direction"]
         peak = position.get("peak_price", position["entry_price"])
 
         if direction == "long" and current_price > peak:
-            new_sl = current_price * (1 - self.MOM_TRAILING_STOP_PCT)
+            new_sl = current_price * (1 - trail_pct)
             if new_sl > position["stop_loss"]:
                 return new_sl
         if direction == "short" and current_price < peak:
-            new_sl = current_price * (1 + self.MOM_TRAILING_STOP_PCT)
+            new_sl = current_price * (1 + trail_pct)
             if new_sl < position["stop_loss"]:
                 return new_sl
         return None
