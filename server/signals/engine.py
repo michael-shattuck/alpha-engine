@@ -155,11 +155,11 @@ class SignalEngine:
         return c.close if c else 0
 
     ASSET_CONFIGS = {
-        "JUP":  {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35},
-        "JTO":  {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35},
-        "PYTH": {"sl": 0.015, "trail": 0.015, "hold": 1800, "thresh": 0.35},
+        "JUP":  {"sl": 0.005, "trail": 0.008, "hold": 1800, "thresh": 0.35},
+        "JTO":  {"sl": 0.005, "trail": 0.008, "hold": 1800, "thresh": 0.35},
+        "PYTH": {"sl": 0.005, "trail": 0.008, "hold": 1800, "thresh": 0.35},
     }
-    DEFAULT_CONFIG = {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35}
+    DEFAULT_CONFIG = {"sl": 0.005, "trail": 0.008, "hold": 1800, "thresh": 0.35}
 
     TF_WEIGHTS = {
         Timeframe.D1: 0.10,
