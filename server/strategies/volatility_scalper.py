@@ -482,10 +482,11 @@ class VolatilityScalper(BaseStrategy):
         )
 
     def _calculate_position_size(self, signal: TradeSignal) -> float:
-        base = self.capital_allocated * self.POSITION_SIZE_PCT
+        effective_capital = self.capital_allocated + self._daily_pnl
+        base = effective_capital * self.POSITION_SIZE_PCT
 
         active_usd = sum(t["collateral_usd"] for t in self._active_trades if t["status"] == "active")
-        available = self.capital_allocated - active_usd
+        available = effective_capital - active_usd
         base = min(base, available)
 
         if self.capital_allocated > 0 and self._daily_pnl < 0:
