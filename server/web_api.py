@@ -320,7 +320,7 @@ async def get_scalper():
         })
 
     drift_account = None
-    if scalper.drift and scalper.drift.client:
+    if scalper.mode == "live" and scalper.drift and scalper.drift.client:
         try:
             user = scalper.drift.client.get_user()
             collateral = user.get_total_collateral() / 1e6
