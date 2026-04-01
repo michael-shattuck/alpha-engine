@@ -387,13 +387,22 @@ async def get_portfolio():
                     base = abs(pos.base_asset_amount) / 1e9
                     entry_notional = abs(pos.quote_entry_amount) / 1e6
                     entry_price = entry_notional / base if base > 0 else 0
+                    try:
+                        oracle = dc.get_oracle_price_data_for_perp_market(pos.market_index)
+                        oracle_price = oracle.price / 1e6
+                        if pos.base_asset_amount > 0:
+                            pos_pnl = (oracle_price - entry_price) * base
+                        else:
+                            pos_pnl = (entry_price - oracle_price) * base
+                    except Exception:
+                        pos_pnl = 0
                     drift_positions.append({
                         "market_index": pos.market_index,
                         "direction": "long" if pos.base_asset_amount > 0 else "short",
                         "size_tokens": base,
                         "entry_price": entry_price,
                         "notional": entry_notional,
-                        "pnl": (pos.quote_asset_amount + pos.quote_entry_amount) / 1e6,
+                        "pnl": pos_pnl,
                     })
         await dc.unsubscribe()
         await conn.close()

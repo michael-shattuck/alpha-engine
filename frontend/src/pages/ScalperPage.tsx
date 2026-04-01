@@ -29,11 +29,12 @@ export default function ScalperPage() {
   const unrealizedPnl = activeTrades.reduce((sum, t) => sum + (t.pnl_usd ?? 0), 0)
   const totalPnl = ds.daily_pnl_usd + unrealizedPnl
   const capital = strategy.capital_allocated || 1
-  const uptimeHours = d.uptime_hours || 0.01
-  const hourlyReturn = totalPnl / capital / Math.max(uptimeHours, 0.01)
-  const projDpy = hourlyReturn * 24 * 100
-  const projMpy = hourlyReturn * 730 * 100
-  const projApy = hourlyReturn * 8760 * 100
+  const closedCount = ds.wins + ds.losses
+  const avgPnlPerTrade = closedCount > 0 ? ds.daily_pnl_usd / closedCount : 0
+  const tradesPerDay = Math.max(closedCount, activeTrades.length) * (24 / Math.max(d.uptime_hours || 0.5, 0.5))
+  const projDpy = closedCount >= 2 ? (avgPnlPerTrade * tradesPerDay / capital * 100) : 0
+  const projMpy = projDpy * 30
+  const projApy = projDpy * 365
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
