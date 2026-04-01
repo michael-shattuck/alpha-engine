@@ -6,6 +6,7 @@ import LPPage from './pages/LPPage'
 import ScalperPage from './pages/ScalperPage'
 import RiskPage from './pages/RiskPage'
 import PortfolioPage from './pages/PortfolioPage'
+import MirrorPage from './pages/MirrorPage'
 
 function AppGuard({ children }: { children: React.ReactNode }) {
   const { status } = useData()
@@ -43,6 +44,7 @@ export default function App() {
               <Route index element={<DashboardPage />} />
               <Route path="lp" element={<LPPage />} />
               <Route path="scalper" element={<ScalperPage />} />
+              <Route path="mirror" element={<MirrorPage />} />
               <Route path="portfolio" element={<PortfolioPage />} />
               <Route path="risk" element={<RiskPage />} />
             </Route>

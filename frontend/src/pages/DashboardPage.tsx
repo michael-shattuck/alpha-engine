@@ -281,7 +281,8 @@ function StrategyCard({ strategy: s, scalperData }: { strategy: StrategyState; s
   const isLP = s.id === 'leveraged_lp'
   const isFunding = s.id === 'funding_arb'
   const m = s.metrics as Record<string, any> ?? {}
-  const link = isScalper ? '/scalper' : isLP ? '/lp' : '#'
+  const isMirror = s.id === 'smart_money_mirror'
+  const link = isScalper ? '/scalper' : isLP ? '/lp' : isMirror ? '/mirror' : '#'
 
   return (
     <Link to={link} className="rounded-lg border border-gray-800 bg-gray-900 p-4 hover:border-gray-700 transition-colors block">
@@ -316,6 +317,14 @@ function StrategyCard({ strategy: s, scalperData }: { strategy: StrategyState; s
             <Row label="Capital" value={`$${s.capital_allocated.toFixed(0)}`} />
             <Row label="Funding APY" value={`${(m.funding_apy ?? 0).toFixed(1)}%`} />
             <Row label="Direction" value={m.funding_direction ?? 'neutral'} />
+          </>
+        )}
+        {isMirror && (
+          <>
+            <Row label="Capital" value={`$${s.capital_allocated.toFixed(0)}`} />
+            <Row label="SSE" value={m.sse_connected ? 'Connected' : 'Disconnected'} />
+            <Row label="Signals" value={`${m.signal_buffer ?? 0} queued`} />
+            <Row label="Active" value={`${m.active_trades ?? 0} positions`} />
           </>
         )}
       </div>
