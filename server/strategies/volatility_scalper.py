@@ -169,7 +169,12 @@ class VolatilityScalper(BaseStrategy):
 
         self._asset_prices["SOL"] = sol_price
         if now - getattr(self, '_last_price_fetch', 0) > 10:
-            await self._fetch_asset_prices()
+            if self.mode == "live" and self.drift and self.drift.client:
+                drift_prices = self.drift.get_oracle_prices()
+                if drift_prices:
+                    self._asset_prices.update(drift_prices)
+            else:
+                await self._fetch_asset_prices()
             self._last_price_fetch = now
 
         for asset, engine in self.engines.items():
@@ -351,6 +356,7 @@ class VolatilityScalper(BaseStrategy):
                 log.warning(f"No price for {signal.asset}, skipping trade")
                 return None
 
+            sl_pct = abs(signal.entry_price - signal.stop_loss) / signal.entry_price if signal.entry_price > 0 else 0.007
             trade = {
                 "id": str(uuid.uuid4())[:12],
                 "direction": direction,
@@ -360,6 +366,7 @@ class VolatilityScalper(BaseStrategy):
                 "current_price": asset_price,
                 "stop_loss": signal.stop_loss,
                 "take_profit": signal.take_profit,
+                "_sl_pct": sl_pct,
                 "size_usd": size * leverage,
                 "leverage": leverage,
                 "collateral_usd": size,
@@ -413,13 +420,27 @@ class VolatilityScalper(BaseStrategy):
         asset = trade["asset"]
         size_usd = trade["size_usd"]
         result = await self.drift.open_perp_position(asset, "long", size_usd, trade["leverage"])
-        log.info(f"Drift long {asset}: ${size_usd:.2f} -> {result}")
+        if result.get("oracle_price"):
+            oracle = result["oracle_price"]
+            trade["entry_price"] = oracle
+            trade["peak_price"] = oracle
+            trade["stop_loss"] = oracle * (1 - trade.get("_sl_pct", 0.007))
+            log.info(f"Drift long {asset}: ${size_usd:.2f} oracle=${oracle:.6f}")
+        else:
+            log.info(f"Drift long {asset}: ${size_usd:.2f} -> {result}")
 
     async def _open_live_short(self, trade: dict, sol_price: float):
         asset = trade["asset"]
         size_usd = trade["size_usd"]
         result = await self.drift.open_perp_position(asset, "short", size_usd, trade["leverage"])
-        log.info(f"Drift short {asset}: ${size_usd:.2f} -> {result}")
+        if result.get("oracle_price"):
+            oracle = result["oracle_price"]
+            trade["entry_price"] = oracle
+            trade["peak_price"] = oracle
+            trade["stop_loss"] = oracle * (1 + trade.get("_sl_pct", 0.007))
+            log.info(f"Drift short {asset}: ${size_usd:.2f} oracle=${oracle:.6f}")
+        else:
+            log.info(f"Drift short {asset}: ${size_usd:.2f} -> {result}")
 
     async def _close_live_long(self, trade: dict, sol_price: float):
         asset = trade["asset"]

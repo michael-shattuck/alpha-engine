@@ -123,6 +123,7 @@ class DriftExecutor:
             "market": market,
             "direction": direction,
             "signature": str(sig),
+            "oracle_price": oracle_price,
         }
 
     async def close_perp_position(self, market: str) -> dict:
@@ -200,6 +201,30 @@ class DriftExecutor:
             perp_market = await get_perp_market_account(self.client.program, market_index)
             rate = perp_market.amm.last_funding_rate / 1e9
             return rate * 8760 * 100
+        except Exception:
+            return 0.0
+
+    def get_oracle_prices(self) -> dict[str, float]:
+        if not self.client:
+            return {}
+        prices = {}
+        for market, idx in MARKET_INDEX.items():
+            if market == "1MBONK":
+                continue
+            try:
+                data = self.client.get_oracle_price_data_for_perp_market(idx)
+                prices[market] = data.price / 1e6
+            except Exception:
+                pass
+        return prices
+
+    def get_oracle_price(self, market: str) -> float:
+        market_index = MARKET_INDEX.get(market.upper())
+        if market_index is None or not self.client:
+            return 0.0
+        try:
+            data = self.client.get_oracle_price_data_for_perp_market(market_index)
+            return data.price / 1e6
         except Exception:
             return 0.0
 
