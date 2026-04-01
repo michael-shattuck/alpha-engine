@@ -7,6 +7,7 @@ from server.signals.candles import CandleAggregator, Timeframe
 from server.signals.regime import RegimeDetector, MarketRegime
 from server.signals.micro_regime import MicroRegimeDetector, MicroRegime, REGIME_ACTIONS
 from server.signals import indicators as ind
+from server.ml.train_v2 import MLSignalPredictor, tf_features
 
 log = logging.getLogger("signal_engine")
 
@@ -62,6 +63,13 @@ class SignalEngine:
 
     COOLDOWN_AFTER_CLOSE = 60
     COOLDOWN_AFTER_LOSS = 120
+
+    _ml_predictor: MLSignalPredictor | None = None
+
+    @classmethod
+    def load_ml_models(cls):
+        cls._ml_predictor = MLSignalPredictor()
+        cls._ml_predictor.load()
 
     def __init__(self, asset: str = "SOL"):
         self.asset = asset
@@ -174,6 +182,61 @@ class SignalEngine:
 
         acfg = self.ASSET_CONFIGS.get(self.asset, self.DEFAULT_CONFIG)
 
+        if self._ml_predictor and self._ml_predictor._loaded and self.asset in self._ml_predictor._dir_models:
+            return self._evaluate_ml(price, acfg, now)
+
+        return self._evaluate_scoring(price, acfg, now)
+
+    def _evaluate_ml(self, price, acfg, now):
+        c1 = self.candles.get_closes(Timeframe.M1, 30)
+        c5 = self.candles.get_closes(Timeframe.M5, 30)
+        c15 = self.candles.get_closes(Timeframe.M15, 30)
+        c60 = self.candles.get_closes(Timeframe.H1, 30)
+        c240 = self.candles.get_closes(Timeframe.H4, 30)
+
+        if len(c1) < 15 or len(c5) < 15 or len(c15) < 15:
+            return self._no_signal(price, "ML warmup")
+
+        f1 = tf_features(c1, price)
+        f5 = tf_features(c5, price)
+        f15 = tf_features(c15, price)
+        f60 = tf_features(c60, price) if len(c60) >= 15 else [0] * 10
+        f240 = tf_features(c240, price) if len(c240) >= 15 else [0] * 10
+
+        direction, confidence, magnitude = self._ml_predictor.predict(
+            self.asset, f1, f5, f15, f60, f240
+        )
+
+        if direction == 0:
+            return self._no_signal(price, f"ML: flat conf={confidence:.2f} mag={magnitude:.2f}%")
+
+        if direction == 1 and confidence > 0.5:
+            return TradeSignal(
+                type=SignalType.LONG, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 - acfg["sl"]),
+                take_profit=price * 1.50,
+                regime="ml", trade_type="ml",
+                reason=f"ML long conf={confidence:.2f} mag={magnitude:+.2f}%",
+                timestamp=now,
+                indicators={"ml_confidence": confidence, "ml_magnitude": magnitude, "ml_direction": direction},
+            )
+
+        if direction == -1 and confidence > 0.5:
+            return TradeSignal(
+                type=SignalType.SHORT, asset=self.asset, confidence=confidence,
+                entry_price=price,
+                stop_loss=price * (1 + acfg["sl"]),
+                take_profit=price * 0.50,
+                regime="ml", trade_type="ml",
+                reason=f"ML short conf={confidence:.2f} mag={magnitude:+.2f}%",
+                timestamp=now,
+                indicators={"ml_confidence": confidence, "ml_magnitude": magnitude, "ml_direction": direction},
+            )
+
+        return self._no_signal(price, f"ML: dir={direction} conf={confidence:.2f} below 0.5")
+
+    def _evaluate_scoring(self, price, acfg, now):
         tf_scores = {}
         tf_details = {}
         ready_count = 0
@@ -198,38 +261,12 @@ class SignalEngine:
 
         total_score = sum(tf_scores.values())
 
-        d1_closes = self.candles.get_closes(Timeframe.D1, 30)
-        d1_ema_bearish = False
-        d1_ema_bullish = False
-        if len(d1_closes) >= 21:
-            d1_e9 = ind.ema(d1_closes, 9)
-            d1_e21 = ind.ema(d1_closes, 21)
-            d1_ema_bearish = d1_e9 < d1_e21
-            d1_ema_bullish = d1_e9 > d1_e21
-        elif len(d1_closes) >= 9:
-            d1_e9 = ind.ema(d1_closes, 9)
-            d1_ema_bearish = d1_closes[-1] < d1_e9
-            d1_ema_bullish = d1_closes[-1] > d1_e9
-
-        h4_closes = self.candles.get_closes(Timeframe.H4, 30)
-        h4_ema_bearish = False
-        h4_ema_bullish = False
-        if len(h4_closes) >= 21:
-            h4_e9 = ind.ema(h4_closes, 9)
-            h4_e21 = ind.ema(h4_closes, 21)
-            h4_ema_bearish = h4_e9 < h4_e21
-            h4_ema_bullish = h4_e9 > h4_e21
-
         reasons = []
         for tf in [Timeframe.D1, Timeframe.H4, Timeframe.H1, Timeframe.M15, Timeframe.M5, Timeframe.M1]:
             if tf in tf_details and tf_details[tf] != "insufficient":
                 reasons.append(f"{tf.value}:{tf_details[tf]}")
 
         if total_score > acfg["thresh"]:
-            if d1_ema_bearish:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1 EMA bearish")
-            if h4_ema_bearish:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED H4 EMA bearish")
             confidence = min(0.5 + total_score, 0.95)
             return TradeSignal(
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
@@ -238,14 +275,10 @@ class SignalEngine:
                 take_profit=price * 1.50,
                 regime="multi_tf", trade_type="multi_tf",
                 reason=f"score={total_score:.2f} " + ", ".join(reasons), timestamp=now,
-                indicators={"score": total_score, **{f"{tf.value}_score": s for tf, s in tf_scores.items()}},
+                indicators={"score": total_score},
             )
 
         if total_score < -acfg["thresh"]:
-            if d1_ema_bullish:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED D1 EMA bullish")
-            if h4_ema_bullish:
-                return self._no_signal(price, f"score={total_score:.2f} BLOCKED H4 EMA bullish")
             confidence = min(0.5 + abs(total_score), 0.95)
             return TradeSignal(
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
@@ -254,7 +287,7 @@ class SignalEngine:
                 take_profit=price * 0.50,
                 regime="multi_tf", trade_type="multi_tf",
                 reason=f"score={total_score:.2f} " + ", ".join(reasons), timestamp=now,
-                indicators={"score": total_score, **{f"{tf.value}_score": s for tf, s in tf_scores.items()}},
+                indicators={"score": total_score},
             )
 
         return self._no_signal(price, f"score={total_score:.2f} " + ", ".join(reasons))

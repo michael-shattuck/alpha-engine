@@ -64,6 +64,8 @@ class VolatilityScalper(BaseStrategy):
         import httpx
         from server.signals.candles import Candle, Timeframe, TIMEFRAME_SECONDS, MAX_CANDLES
 
+        SignalEngine.load_ml_models()
+
         if self.mode == "live":
             await self.init_executors()
 
