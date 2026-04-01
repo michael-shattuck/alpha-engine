@@ -29,8 +29,25 @@ export default function DashboardPage() {
   const ds = scalper.data?.daily_stats
   const activeTrades = scalper.data?.active_trades ?? []
   const unrealizedPnl = activeTrades.reduce((sum: number, t: { pnl_usd?: number }) => sum + (t.pnl_usd ?? 0), 0)
-  const scalperPnl = (ds?.daily_pnl_usd ?? 0) + unrealizedPnl
+  const realizedPnl = ds?.daily_pnl_usd ?? 0
+  const totalPnl = realizedPnl + unrealizedPnl
   const driftAcct = (scalper.data as any)?.drift_account
+  const capital = driftAcct?.starting_capital ?? 199.04
+
+  const uptimeHrs = Math.max(d.uptime_hours || 0.5, 0.5)
+  const closedCount = (ds?.wins ?? 0) + (ds?.losses ?? 0)
+  const hasData = closedCount >= 2
+
+  const totalPerHour = hasData ? totalPnl / uptimeHrs : 0
+  const realizedPerHour = hasData ? realizedPnl / uptimeHrs : 0
+  const unrealizedPerHour = hasData ? unrealizedPnl / uptimeHrs : 0
+
+  const projDpy = totalPerHour * 24 / capital * 100
+  const projMpy = projDpy * 30
+  const projApy = projDpy * 365
+
+  const realDpy = realizedPerHour * 24 / capital * 100
+  const unrealDpy = unrealizedPerHour * 24 / capital * 100
 
   return (
     <div className="space-y-5">
@@ -44,9 +61,9 @@ export default function DashboardPage() {
         </Card>
         <Card>
           <Label>Session PnL</Label>
-          <Value color={scalperPnl >= 0 ? 'green' : 'red'}>{fmt(scalperPnl)}</Value>
-          <Sub positive={scalperPnl >= 0}>
-            {activeTrades.length} active | {ds?.wins ?? 0}W/{ds?.losses ?? 0}L
+          <Value color={totalPnl >= 0 ? 'green' : 'red'}>{fmt(totalPnl)}</Value>
+          <Sub positive={totalPnl >= 0}>
+            realized: {fmt(realizedPnl)} | open: {fmt(unrealizedPnl)}
           </Sub>
         </Card>
         <Card>
@@ -59,8 +76,52 @@ export default function DashboardPage() {
         <Card>
           <Label>Market Regime</Label>
           <Value color={REGIME_COLORS[regime]}>{REGIME_LABELS[regime] ?? regime}</Value>
-          <Sub>{((scalper.data?.regime_confidence ?? 0) * 100).toFixed(0)}% confidence</Sub>
+          <Sub>{((scalper.data?.regime_confidence ?? 0) * 100).toFixed(0)}% conf | {ds?.wins ?? 0}W/{ds?.losses ?? 0}L</Sub>
         </Card>
+      </div>
+
+      <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+        <div className="grid grid-cols-3 gap-6 sm:grid-cols-6">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-600">Proj DPY</div>
+            <div className={`font-mono text-sm font-bold ${projDpy >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {hasData ? `${projDpy >= 0 ? '+' : ''}${projDpy.toFixed(2)}%` : '--'}
+            </div>
+            {hasData && <div className="font-mono text-[10px] text-gray-600" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              r:{realDpy >= 0 ? '+' : ''}{realDpy.toFixed(1)}% u:{unrealDpy >= 0 ? '+' : ''}{unrealDpy.toFixed(1)}%
+            </div>}
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-600">Proj MPY</div>
+            <div className={`font-mono text-sm font-bold ${projMpy >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {hasData ? `${projMpy >= 0 ? '+' : ''}${projMpy.toFixed(1)}%` : '--'}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-600">Proj APY</div>
+            <div className={`font-mono text-sm font-bold ${projApy >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {hasData ? `${projApy >= 0 ? '+' : ''}${projApy.toFixed(0)}%` : '--'}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-600">$/Hour</div>
+            <div className={`font-mono text-sm font-bold ${totalPerHour >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {hasData ? `${totalPerHour >= 0 ? '+' : ''}${fmt(totalPerHour)}` : '--'}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-600">%/Hour</div>
+            <div className={`font-mono text-sm font-bold ${totalPerHour >= 0 ? 'text-green-400' : 'text-red-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {hasData ? `${totalPerHour >= 0 ? '+' : ''}${(totalPerHour / capital * 100).toFixed(3)}%` : '--'}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-600">Uptime</div>
+            <div className="font-mono text-sm text-white" style={{ fontVariantNumeric: 'tabular-nums' }}>
+              {uptimeHrs.toFixed(1)}h
+            </div>
+          </div>
+        </div>
       </div>
 
       <div>
