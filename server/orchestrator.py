@@ -295,14 +295,28 @@ class Orchestrator:
             return
 
         regime = scalper.signal_engine.regime_detector.regime
+        regime_confidence = scalper.signal_engine.regime_detector.confidence
+
+        funding_arb = self.strategies.get("funding_arb")
+        funding_apy = 0
+        if funding_arb and hasattr(funding_arb, "_best_funding_apy"):
+            funding_apy = funding_arb._best_funding_apy
+
+        volatility_2h = self.prices.get_market_data().get("volatility_1h", 0)
+
         current_allocs = {
             sid: s.target_allocation for sid, s in self.strategies.items()
-            if sid in ("leveraged_lp", "volatility_scalper")
+            if s.enabled or s.capital_allocated > 0
         }
 
-        new_allocs = self.allocator.should_rebalance(regime, current_allocs)
+        new_allocs = self.allocator.should_rebalance(
+            regime, current_allocs,
+            regime_confidence=regime_confidence,
+            funding_apy=funding_apy,
+            volatility_2h=volatility_2h,
+        )
         if new_allocs:
-            log.info(f"Dynamic reallocation: {current_allocs} -> {new_allocs} (regime={regime.value})")
+            log.info(f"Dynamic reallocation: regime={regime.value} conf={regime_confidence:.2f} funding={funding_apy:.1f}% vol={volatility_2h:.4f}")
             self._apply_allocations(new_allocs)
             self.state.add_event("dynamic_reallocation", "allocator", {
                 "regime": regime.value,

@@ -274,6 +274,19 @@ class VolatilityScalper(BaseStrategy):
             if now - last_trade < cooldown:
                 return {"action": "wait", "reason": "cooldown"}
 
+        active_longs = sum(1 for t in self._active_trades if t["status"] == "active" and t["direction"] == "long")
+        active_shorts = sum(1 for t in self._active_trades if t["status"] == "active" and t["direction"] == "short")
+
+        sol_engine = self.engines.get("SOL")
+        sol_d1_bearish = False
+        if sol_engine:
+            from server.signals.candles import Timeframe
+            from server.signals import indicators as _ind
+            sol_d1 = sol_engine.candles.get_closes(Timeframe.D1, 30)
+            if len(sol_d1) >= 9:
+                sol_e9 = _ind.ema(sol_d1, min(9, len(sol_d1)))
+                sol_d1_bearish = sol_d1[-1] < sol_e9
+
         best_signal = None
         best_confidence = 0
         for asset, engine in self.engines.items():
@@ -288,6 +301,13 @@ class VolatilityScalper(BaseStrategy):
 
             signal = engine.evaluate(price)
             if signal.type not in (SignalType.LONG, SignalType.SHORT):
+                continue
+
+            if signal.type == SignalType.LONG and active_longs >= 3:
+                continue
+            if signal.type == SignalType.SHORT and active_shorts >= 3:
+                continue
+            if signal.type == SignalType.LONG and sol_d1_bearish and asset != "SOL":
                 continue
 
             allowed, adj_conf, learn_reason = self.learner.get_entry_filter(
@@ -354,6 +374,14 @@ class VolatilityScalper(BaseStrategy):
             if asset_price <= 0:
                 log.warning(f"No price for {signal.asset}, skipping trade")
                 return None
+
+            if self.mode == "live" and self.drift and self.drift.client:
+                drift_price = self.drift.get_oracle_price(signal.asset)
+                if drift_price > 0 and asset_price > 0:
+                    divergence = abs(drift_price - asset_price) / asset_price
+                    if divergence > 0.003:
+                        log.warning(f"Oracle divergence {signal.asset}: pyth={asset_price:.6f} drift={drift_price:.6f} gap={divergence:.4%}")
+                        return None
 
             sl_pct = abs(signal.entry_price - signal.stop_loss) / signal.entry_price if signal.entry_price > 0 else 0.007
             trade = {

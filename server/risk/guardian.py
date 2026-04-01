@@ -108,6 +108,8 @@ class Guardian:
         self.stop_loss = StopLoss()
         self._hourly_pnl: list[dict] = []
         self._last_assessment: dict = {}
+        self._strategy_peaks: dict[str, float] = {}
+        self._strategy_disabled_until: dict[str, float] = {}
 
     def assess(self, portfolio: dict, market_data: dict) -> dict:
         equity = portfolio.get("total_equity", 0)
@@ -193,6 +195,41 @@ class Guardian:
                             "reason": f"trailing_stop ({self.stop_loss.trailing_stop_pct}%)",
                         })
                         risk_level = max(risk_level, "high", key=["low", "medium", "high", "critical"].index)
+
+        now = time.time()
+        for sid, state in strategies.items():
+            strat_value = state.get("current_value", state.get("capital_allocated", 0))
+            if strat_value <= 0:
+                continue
+
+            peak = self._strategy_peaks.get(sid, strat_value)
+            self._strategy_peaks[sid] = max(peak, strat_value)
+            strat_dd = (self._strategy_peaks[sid] - strat_value) / self._strategy_peaks[sid] * 100 if self._strategy_peaks[sid] > 0 else 0
+
+            disabled_until = self._strategy_disabled_until.get(sid, 0)
+            if disabled_until > now:
+                actions.append({
+                    "type": "disable_strategy",
+                    "strategy": sid,
+                    "reason": f"drawdown_cooldown (until {int(disabled_until - now)}s)",
+                })
+                continue
+
+            if strat_dd > 15:
+                self._strategy_disabled_until[sid] = now + 14400
+                actions.append({
+                    "type": "disable_strategy",
+                    "strategy": sid,
+                    "reason": f"strategy_drawdown_{strat_dd:.1f}%_disable_4h",
+                })
+                risk_level = max(risk_level, "high", key=["low", "medium", "high", "critical"].index)
+            elif strat_dd > 10:
+                actions.append({
+                    "type": "halve_allocation",
+                    "strategy": sid,
+                    "reason": f"strategy_drawdown_{strat_dd:.1f}%_halve",
+                })
+                risk_level = max(risk_level, "medium", key=["low", "medium", "high", "critical"].index)
 
         if dd_pct > 15:
             risk_level = "critical"
