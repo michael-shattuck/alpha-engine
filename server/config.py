@@ -43,8 +43,8 @@ DEFAULT_MODE = "paper"
 SMART_MONEY_SSE_URL = os.getenv("SMART_MONEY_SSE_URL", "http://4.154.209.244:8081")
 
 DEFAULT_CAPITAL_ALLOCATION = {
-    "leveraged_lp": 0.167,
-    "volatility_scalper": 0.833,
+    "leveraged_lp": 0.0,
+    "volatility_scalper": 1.0,
     "funding_arb": 0.0,
     "jlp": 0.0,
     "smart_money_mirror": 0.0,
