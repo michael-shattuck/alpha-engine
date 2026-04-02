@@ -379,7 +379,7 @@ class VolatilityScalper(BaseStrategy):
                 drift_price = self.drift.get_oracle_price(signal.asset)
                 if drift_price > 0 and asset_price > 0:
                     divergence = abs(drift_price - asset_price) / asset_price
-                    if divergence > 0.003:
+                    if divergence > 0.05:
                         log.warning(f"Oracle divergence {signal.asset}: pyth={asset_price:.6f} drift={drift_price:.6f} gap={divergence:.4%}")
                         return None
 
