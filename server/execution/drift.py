@@ -101,19 +101,12 @@ class DriftExecutor:
         base_tokens = size_usd / oracle_price
         base_amount = int(base_tokens * 1e9)
 
-        slippage = 0.002
-        if direction == "long":
-            limit_price = int(oracle_price * (1 + slippage) * 1e6)
-        else:
-            limit_price = int(oracle_price * (1 - slippage) * 1e6)
-
         order_params = OrderParams(
-            order_type=OrderType.Limit(),
+            order_type=OrderType.Market(),
             market_type=MarketType.Perp(),
             market_index=market_index,
             direction=perp_direction,
             base_asset_amount=base_amount,
-            price=limit_price,
         )
 
         sig = await self.client.place_perp_order(order_params)
