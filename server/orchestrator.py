@@ -123,7 +123,7 @@ class Orchestrator:
 
                 if now - self._last_risk_check >= RISK_CHECK_INTERVAL:
                     await self._intelligence_cycle(market_data)
-                    self._check_dynamic_allocation()
+                    # self._check_dynamic_allocation()  # disabled for manual allocation test
                     self._last_risk_check = now
 
                 for sid, strategy in self.strategies.items():
