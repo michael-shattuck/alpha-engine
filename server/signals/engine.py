@@ -155,11 +155,11 @@ class SignalEngine:
         return c.close if c else 0
 
     ASSET_CONFIGS = {
-        "JUP":  {"sl": 0.005, "trail": 0.008, "hold": 1800, "thresh": 0.35},
-        "JTO":  {"sl": 0.005, "trail": 0.008, "hold": 1800, "thresh": 0.35},
-        "PYTH": {"sl": 0.005, "trail": 0.008, "hold": 1800, "thresh": 0.35},
+        "JUP":  {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35},
+        "JTO":  {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35},
+        "PYTH": {"sl": 0.015, "trail": 0.015, "hold": 1800, "thresh": 0.35},
     }
-    DEFAULT_CONFIG = {"sl": 0.005, "trail": 0.008, "hold": 1800, "thresh": 0.35}
+    DEFAULT_CONFIG = {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35}
 
     TF_WEIGHTS = {
         Timeframe.D1: 0.10,
@@ -831,7 +831,7 @@ class SignalEngine:
                         return self._exit_signal(current_price, SignalType.CLOSE_SHORT, "regime_now_trending_up")
 
         age = now - opened_at
-        if trade_type == "multi_tf":
+        if trade_type in ("multi_tf", "combined"):
             max_hold = acfg["hold"]
         elif trade_type == "mean_reversion":
             max_hold = self.AMR_MAX_HOLD if self.regime_detector.regime == MarketRegime.VOLATILE_RANGING else self.MR_MAX_HOLD
