@@ -283,6 +283,8 @@ class LeveragedLPStrategy(BaseStrategy):
         if sol_price <= 0:
             return None
 
+        log.info(f"LP execute: mode={self.mode} action={action.get('action')} positions={len(self.active_positions)}")
+
         if self.mode == "live":
             return await self._execute_live(action, market_data)
         return await self._execute_paper(action, market_data)
