@@ -154,6 +154,72 @@ export default function PortfolioPage() {
         </div>
       </div>
 
+      {((status.data?.strategies?.['leveraged_lp'] as any)?.positions?.length ?? 0) > 0 && (
+        <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
+          <h2 className="mb-4 text-sm font-medium tracking-wide text-gray-400 uppercase">Orca LP Positions</h2>
+          <div className="space-y-3">
+            {(status.data.strategies['leveraged_lp'].positions as any[]).map((pos: any, i: number) => {
+              const pool = pos.pool ?? ''
+              const orcaUrl = pos.metadata?.position_mint && pos.metadata.position_mint !== 'none'
+                ? `https://www.orca.so/positions/${pos.metadata.position_mint}`
+                : `https://www.orca.so/pools/${pool}`
+              const fees = pos.fees_earned_usd ?? 0
+              const il = pos.il_percent ?? 0
+              const deposit = pos.deposit_usd ?? 0
+              const value = pos.current_value_usd ?? 0
+              const inRange = pos.in_range ?? false
+              const leverage = pos.metadata?.leverage ?? 1
+              const borrowed = pos.metadata?.borrowed_usd ?? 0
+              const age = ((Date.now() / 1000 - (pos.opened_at ?? 0)) / 3600)
+              return (
+                <a key={i} href={orcaUrl} target="_blank" rel="noopener noreferrer"
+                  className="block rounded border border-gray-800 bg-gray-950/50 p-4 hover:border-gray-700 transition-colors">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-white">SOL/USDC</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                        inRange ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'
+                      }`}>{inRange ? 'IN RANGE' : 'OUT OF RANGE'}</span>
+                      {leverage > 1 && (
+                        <span className="rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-purple-400">{leverage.toFixed(1)}x</span>
+                      )}
+                      <span className="text-[10px] text-gray-600">View on Orca</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 text-xs">
+                    <div>
+                      <div className="text-gray-600">Deposited</div>
+                      <div className="font-mono text-white" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(deposit)}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600">Value</div>
+                      <div className="font-mono text-white" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(value)}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600">Fees Earned</div>
+                      <div className="font-mono text-green-400" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(fees)}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600">IL</div>
+                      <div className={`font-mono ${il > 0 ? 'text-red-400' : 'text-green-400'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{il.toFixed(2)}%</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600">Age</div>
+                      <div className="font-mono text-gray-300" style={{ fontVariantNumeric: 'tabular-nums' }}>{age.toFixed(1)}h</div>
+                    </div>
+                  </div>
+                  {borrowed > 0 && (
+                    <div className="mt-2 text-[10px] text-gray-500">
+                      Borrowed: {fmt(borrowed)} via MarginFi | Range: ${(pos.lower_price ?? 0).toFixed(2)} - ${(pos.upper_price ?? 0).toFixed(2)}
+                    </div>
+                  )}
+                </a>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {status.data && (
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
           <h2 className="mb-4 text-sm font-medium tracking-wide text-gray-400 uppercase">Strategy Allocation</h2>
