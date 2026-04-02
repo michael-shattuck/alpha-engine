@@ -127,7 +127,11 @@ class SmartMoneyMirror(BaseStrategy):
 
     async def _on_sse_signal(self, event: dict):
         action = event.get("action", "")
+        if not action:
+            action = event.get("type", event.get("side", ""))
+        action = action.upper()
         if action not in ("BUY", "SELL"):
+            log.debug(f"SSE event skipped: action={event.get('action','')} keys={list(event.keys())[:5]}")
             return
 
         mint = event.get("mint", "")
