@@ -104,7 +104,7 @@ class SmartMoneyMirror(BaseStrategy):
     DAILY_LOSS_LIMIT_PCT = 5.0
     COOLDOWN_AFTER_LOSS_SEC = 90
     COOLDOWN_AFTER_WIN_SEC = 20
-    MIN_FLOW_VOLUME = 1.0
+    MIN_FLOW_VOLUME = 0.5
 
     def __init__(self, mode: str = "paper"):
         super().__init__(mode=mode)

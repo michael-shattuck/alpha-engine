@@ -39,10 +39,10 @@ class VolatilityScalper(BaseStrategy):
     STRATEGY_ID = "volatility_scalper"
     STRATEGY_NAME = "Volatility Scalper"
 
-    MAX_CONCURRENT_POSITIONS = 5
+    MAX_CONCURRENT_POSITIONS = 3
     MAX_LEVERAGE = 3.0
     MIN_TRADE_USD = 1.0
-    POSITION_SIZE_PCT = 0.08
+    POSITION_SIZE_PCT = 0.20
     COOLDOWN_AFTER_LOSS_SEC = 120
     COOLDOWN_AFTER_WIN_SEC = 30
     DAILY_LOSS_LIMIT_PCT = 5.0
