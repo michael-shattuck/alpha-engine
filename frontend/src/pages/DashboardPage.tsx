@@ -43,8 +43,14 @@ export default function DashboardPage() {
   const fundingPositions = fundingArb?.positions ?? []
   const fundingPnl = fundingPositions.reduce((sum: number, p: any) => sum + (p?.fees_earned_usd ?? 0), 0)
 
-  const totalRealized = scalperRealized + lpFees + fundingPnl
-  const totalUnrealized = scalperUnrealized + lpValuePnl
+  const mirror = d.strategies['smart_money_mirror']
+  const mirrorDs = (mirror as any)?.metrics?.daily_pnl ?? 0
+  const mirrorPositions = mirror?.positions ?? []
+  const mirrorUnrealized = mirrorPositions.reduce((sum: number, p: any) => sum + ((p?.current_value_usd ?? 0) - (p?.deposit_usd ?? 0)), 0)
+  const mirrorPnl = mirrorDs + mirrorUnrealized
+
+  const totalRealized = scalperRealized + lpFees + fundingPnl + mirrorDs
+  const totalUnrealized = scalperUnrealized + lpValuePnl + mirrorUnrealized
   const totalPnl = totalRealized + totalUnrealized
   const capital = driftAcct?.starting_capital ?? 199.04
 
@@ -73,7 +79,7 @@ export default function DashboardPage() {
           <Label>Session PnL (All)</Label>
           <Value color={totalPnl >= 0 ? 'green' : 'red'}>{fmt(totalPnl)}</Value>
           <Sub positive={totalPnl >= 0}>
-            scalper: {fmt(scalperPnl)} | LP: {fmt(lpPnl)} | funding: {fmt(fundingPnl)}
+            scalper: {fmt(scalperPnl)} | mirror: {fmt(mirrorPnl)} | LP: {fmt(lpPnl)}
           </Sub>
         </Card>
         <Card>
