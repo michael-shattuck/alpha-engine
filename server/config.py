@@ -45,10 +45,10 @@ PYTH_HERMES_URL = os.getenv("PYTH_HERMES_URL", "http://20.120.229.168:4160")
 
 DEFAULT_CAPITAL_ALLOCATION = {
     "leveraged_lp": 0.0,
-    "volatility_scalper": 1.0,
-    "funding_arb": 0.0,
-    "jlp": 0.0,
-    "smart_money_mirror": 0.0,
+    "volatility_scalper": 0.50,
+    "funding_arb": 0.10,
+    "jlp": 0.05,
+    "smart_money_mirror": 0.35,
 }
 
 RISK_LIMITS = {
