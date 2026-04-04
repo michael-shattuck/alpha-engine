@@ -418,7 +418,14 @@ class SmartMoneyMirror(BaseStrategy):
             if signal.type not in (SignalType.LONG, SignalType.SHORT):
                 if flow_boost > 0.1:
                     acfg = engine.ASSET_CONFIGS.get(asset, engine.DEFAULT_CONFIG)
-                    score = signal.indicators.get("combined", signal.indicators.get("tf_score", 0)) if signal.indicators else 0
+                    score = 0
+                    if signal.indicators:
+                        score = signal.indicators.get("combined", signal.indicators.get("tf_score", 0))
+                    if score == 0 and "combined=" in signal.reason:
+                        try:
+                            score = float(signal.reason.split("combined=")[1].split(" ")[0])
+                        except (ValueError, IndexError):
+                            pass
                     boosted_thresh = acfg["thresh"] * (1 - flow_boost)
                     if (flow_score < -0.3 and score < -boosted_thresh) or (flow_score > 0.3 and score > boosted_thresh):
                         direction = SignalType.SHORT if score < 0 else SignalType.LONG
