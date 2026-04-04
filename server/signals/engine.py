@@ -258,16 +258,8 @@ class SignalEngine:
         ml_tag = f" ML:{ml_direction}@{ml_confidence:.0%}" if has_ml else ""
         reason_str = f"combined={combined:.2f} tf={tf_total:.2f}{ml_tag} " + ", ".join(reasons[:4])
 
-        long_thresh = acfg["thresh"] * 2 if d1_bearish else acfg["thresh"]
-        if combined > long_thresh:
-            if has_ml and ml_bearish:
-                return self._no_signal(price, f"{reason_str} BLOCKED ML disagrees (bearish)")
-            if not tf_bullish and not ml_bullish:
-                return self._no_signal(price, f"{reason_str} no confirmation")
-
+        if combined > acfg["thresh"]:
             confidence = min(0.5 + abs(combined), 0.95)
-            if has_ml and ml_bullish:
-                confidence = min(confidence + 0.1, 0.95)
 
             return TradeSignal(
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
@@ -279,12 +271,7 @@ class SignalEngine:
                 indicators={"combined": combined, "tf_score": tf_total, "ml_dir": ml_direction, "ml_conf": ml_confidence},
             )
 
-        short_thresh = acfg["thresh"] * 2 if d1_bullish else acfg["thresh"]
-        if combined < -short_thresh:
-            if has_ml and ml_bullish:
-                return self._no_signal(price, f"{reason_str} BLOCKED ML disagrees (bullish)")
-            if not tf_bearish and not ml_bearish:
-                return self._no_signal(price, f"{reason_str} no confirmation")
+        if combined < -acfg["thresh"]:
 
             confidence = min(0.5 + abs(combined), 0.95)
             if has_ml and ml_bearish:
