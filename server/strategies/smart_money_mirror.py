@@ -403,6 +403,8 @@ class SmartMoneyMirror(BaseStrategy):
         active_longs = sum(1 for t in self._active_trades if t["status"] == "active" and t["direction"] == "long")
         active_shorts = sum(1 for t in self._active_trades if t["status"] == "active" and t["direction"] == "short")
 
+        flow_boost = abs(flow_score) * 0.3
+
         for asset, engine in self.engines.items():
             price = self._asset_prices.get(asset, 0)
             if price <= 0 or not engine.is_warmed_up:
@@ -414,7 +416,24 @@ class SmartMoneyMirror(BaseStrategy):
 
             signal = engine.evaluate(price)
             if signal.type not in (SignalType.LONG, SignalType.SHORT):
-                continue
+                if flow_boost > 0.1:
+                    acfg = engine.ASSET_CONFIGS.get(asset, engine.DEFAULT_CONFIG)
+                    score = signal.indicators.get("combined", signal.indicators.get("tf_score", 0)) if signal.indicators else 0
+                    boosted_thresh = acfg["thresh"] * (1 - flow_boost)
+                    if (flow_score < -0.3 and score < -boosted_thresh) or (flow_score > 0.3 and score > boosted_thresh):
+                        direction = SignalType.SHORT if score < 0 else SignalType.LONG
+                        signal = TradeSignal(
+                            type=direction, asset=engine.asset, confidence=min(0.5 + abs(score) + flow_boost, 0.95),
+                            entry_price=price, stop_loss=price * (1 - acfg["sl"]) if direction == SignalType.LONG else price * (1 + acfg["sl"]),
+                            take_profit=price * 1.50 if direction == SignalType.LONG else price * 0.50,
+                            regime="mirror_flow", trade_type="mirror_flow",
+                            reason=f"flow_boosted score={score:.2f} flow={flow_score:.2f}",
+                            timestamp=now, indicators={"score": score, "flow": flow_score},
+                        )
+                    else:
+                        continue
+                else:
+                    continue
 
             if signal.type == SignalType.LONG and flow_score < -0.2:
                 continue
