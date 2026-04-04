@@ -192,21 +192,32 @@ class SmartMoneyMirror(BaseStrategy):
         )
 
     async def _on_sse_event(self, event: dict):
-        action = event.get("action", "").upper()
-        if not action:
-            action = event.get("type", event.get("side", "")).upper()
-        if action not in ("BUY", "SELL"):
-            return
+        event_type = event.get("_event_type", "trade")
 
-        sol_amount = event.get("size_sol", 0)
-        if sol_amount <= 0:
-            return
+        if event_type == "trade":
+            action = event.get("action", "").upper()
+            if not action:
+                action = event.get("type", event.get("side", "")).upper()
+            if action not in ("BUY", "SELL"):
+                return
+            sol_amount = event.get("size_sol", 0)
+            if sol_amount <= 0:
+                return
+            wallet_prefix = event.get("wallet", "")[:12]
+            wallet_info = self._wallet_cache.get(wallet_prefix, {})
+            wallet_tier = wallet_info.get("tier", "unknown")
+            self.flow.record(action, sol_amount, wallet_tier)
 
-        wallet_prefix = event.get("wallet", "")[:12]
-        wallet_info = self._wallet_cache.get(wallet_prefix, {})
-        wallet_tier = wallet_info.get("tier", "unknown")
-
-        self.flow.record(action, sol_amount, wallet_tier)
+        elif event_type == "state":
+            positions = event.get("positions", [])
+            closed = event.get("closed_trades", [])
+            for pos in positions:
+                size = pos.get("size_usd", 0)
+                if size > 0:
+                    self.flow.record("BUY", size / 80, "unknown")
+            for trade in closed:
+                pnl = trade.get("pnl_sol", 0)
+                self.flow.record("SELL", abs(pnl) if pnl else 0.01, "unknown")
 
     PYTH_FEEDS = {
         "SOL": "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",

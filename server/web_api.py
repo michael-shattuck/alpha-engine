@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     mode = app.state.mode if hasattr(app.state, "mode") else DEFAULT_MODE
 
     orchestrator = Orchestrator(capital=capital, mode=mode)
-    orchestrator.register_strategy(LeveragedLPStrategy(mode=mode))
+    orchestrator.register_strategy(LeveragedLPStrategy(mode=mode, base_leverage=1.0))
     orchestrator.register_strategy(VolatilityScalper(mode=mode))
     orchestrator.register_strategy(FundingArbStrategy(mode=mode))
     orchestrator.register_strategy(JLPStrategy(mode=mode))

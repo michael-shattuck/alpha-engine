@@ -99,9 +99,10 @@ class SSEConsumer:
 
                     if line.startswith("event:"):
                         event_type = line[6:].strip()
-                    elif line.startswith("data:") and event_type == "trade":
+                    elif line.startswith("data:") and event_type in ("trade", "state"):
                         try:
                             data = json.loads(line[5:].strip())
+                            data["_event_type"] = event_type
                             self.stats["events_received"] += 1
                             self.stats["last_event_time"] = time.time()
                             await self._callback(data)

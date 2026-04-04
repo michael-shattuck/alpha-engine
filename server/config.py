@@ -44,9 +44,9 @@ SMART_MONEY_SSE_URL = os.getenv("SMART_MONEY_SSE_URL", "http://4.154.209.244:808
 PYTH_HERMES_URL = os.getenv("PYTH_HERMES_URL", "http://20.120.229.168:4160")
 
 DEFAULT_CAPITAL_ALLOCATION = {
-    "leveraged_lp": 0.0,
-    "volatility_scalper": 0.50,
-    "funding_arb": 0.10,
+    "leveraged_lp": 0.15,
+    "volatility_scalper": 0.40,
+    "funding_arb": 0.05,
     "jlp": 0.05,
     "smart_money_mirror": 0.35,
 }
