@@ -258,9 +258,8 @@ class SignalEngine:
         ml_tag = f" ML:{ml_direction}@{ml_confidence:.0%}" if has_ml else ""
         reason_str = f"combined={combined:.2f} tf={tf_total:.2f}{ml_tag} " + ", ".join(reasons[:4])
 
-        if combined > acfg["thresh"]:
-            if d1_bearish:
-                return self._no_signal(price, f"{reason_str} BLOCKED D1 bearish -- no longs")
+        long_thresh = acfg["thresh"] * 2 if d1_bearish else acfg["thresh"]
+        if combined > long_thresh:
             if has_ml and ml_bearish:
                 return self._no_signal(price, f"{reason_str} BLOCKED ML disagrees (bearish)")
             if not tf_bullish and not ml_bullish:
@@ -280,9 +279,8 @@ class SignalEngine:
                 indicators={"combined": combined, "tf_score": tf_total, "ml_dir": ml_direction, "ml_conf": ml_confidence},
             )
 
-        if combined < -acfg["thresh"]:
-            if d1_bullish:
-                return self._no_signal(price, f"{reason_str} BLOCKED D1 bullish -- no shorts")
+        short_thresh = acfg["thresh"] * 2 if d1_bullish else acfg["thresh"]
+        if combined < -short_thresh:
             if has_ml and ml_bullish:
                 return self._no_signal(price, f"{reason_str} BLOCKED ML disagrees (bullish)")
             if not tf_bearish and not ml_bearish:
