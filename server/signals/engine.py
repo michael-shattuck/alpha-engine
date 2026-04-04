@@ -817,7 +817,7 @@ class SignalEngine:
             if current_price >= trail_stop:
                 return self._exit_signal(current_price, SignalType.CLOSE_SHORT, f"trailing_stop (trough=${peak:.4f})")
 
-        if trade_type != "multi_tf":
+        if trade_type not in ("multi_tf", "combined"):
             assessment = self.regime_detector._last_assessment
             if assessment:
                 regime = assessment.regime
