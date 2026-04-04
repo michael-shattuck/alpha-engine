@@ -620,7 +620,7 @@ class VolatilityScalper(BaseStrategy):
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             cur.execute(
-                "SELECT pnl_usd, trade_type FROM trades WHERE status = 'closed' AND closed_at >= %s AND trade_type = 'multi_tf'",
+                "SELECT pnl_usd, trade_type FROM trades WHERE status = 'closed' AND closed_at >= %s AND trade_type IN ('multi_tf', 'combined')",
                 (today_start,)
             )
             rows = cur.fetchall()
