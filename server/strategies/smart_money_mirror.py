@@ -37,9 +37,9 @@ def get_slippage(symbol: str) -> float:
 
 
 LEVERAGE_TIERS = {
-    "aggressive": {"leverage": 10.0, "min_flow": 0.6, "sl_pct": 0.015, "tp_pct": 0.030, "trail_activate": 0.08, "trail_distance": 0.05, "max_hold_sec": 7200},
-    "confident":  {"leverage": 7.0,  "min_flow": 0.3, "sl_pct": 0.014, "tp_pct": 0.025, "trail_activate": 0.08, "trail_distance": 0.05, "max_hold_sec": 5400},
-    "moderate":   {"leverage": 5.0,  "min_flow": 0.0, "sl_pct": 0.010, "tp_pct": 0.020, "trail_activate": 0.06, "trail_distance": 0.04, "max_hold_sec": 3600},
+    "aggressive": {"leverage": 3.0, "min_flow": 0.6, "sl_pct": 0.015, "tp_pct": 0.030, "trail_activate": 0.02, "trail_distance": 0.02, "max_hold_sec": 1800, "size_mult": 1.5},
+    "confident":  {"leverage": 3.0, "min_flow": 0.3, "sl_pct": 0.015, "tp_pct": 0.025, "trail_activate": 0.02, "trail_distance": 0.02, "max_hold_sec": 1800, "size_mult": 1.2},
+    "moderate":   {"leverage": 3.0, "min_flow": 0.0, "sl_pct": 0.015, "tp_pct": 0.020, "trail_activate": 0.02, "trail_distance": 0.02, "max_hold_sec": 1800, "size_mult": 1.0},
 }
 
 FLOW_WINDOW_SEC = 300
