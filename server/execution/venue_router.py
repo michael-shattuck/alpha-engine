@@ -44,11 +44,20 @@ class VenueRouter:
             return
 
         from server.execution.jupiter_perps import JupiterPerpsExecutor
+        from server.execution.flash_trade import FlashTradeExecutor
 
         jup = JupiterPerpsExecutor(paper_mode=self.paper_mode)
         await jup.start()
         self.venues["jupiter"] = jup
         self.venue_health["jupiter"] = VenueHealth()
+
+        try:
+            flash = FlashTradeExecutor(paper_mode=self.paper_mode)
+            await flash.start()
+            self.venues["flash"] = flash
+            self.venue_health["flash"] = VenueHealth()
+        except Exception as e:
+            log.warning(f"Flash Trade init failed: {e}")
 
         try:
             from server.execution.drift import DriftExecutor, SETTLEMENT_MARKETS
