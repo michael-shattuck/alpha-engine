@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from server.strategies.base import BaseStrategy, StrategyPosition
-from server.execution.venue_router import VenueRouter, MARKET_INDEX
+from server.execution.venue_router import VenueRouter
 
 log = logging.getLogger("funding_arb")
 
