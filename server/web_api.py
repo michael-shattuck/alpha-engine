@@ -324,18 +324,17 @@ async def get_scalper():
         })
 
     drift_account = None
-    if scalper.mode == "live" and scalper.drift and scalper.drift.client:
+    if scalper.mode == "live" and scalper.router:
         try:
-            user = scalper.drift.client.get_user()
-            collateral = user.get_total_collateral() / 1e6
-            upnl = user.get_unrealized_pnl() / 1e6
-            drift_account = {
-                "collateral": collateral,
-                "unrealized_pnl": upnl,
-                "net_value": collateral + upnl,
-                "starting_capital": 199.04,
-                "total_pnl": (collateral + upnl) - 199.04,
-            }
+            summary = scalper.router.get_account_summary()
+            if summary:
+                drift_account = {
+                    "collateral": summary["collateral"],
+                    "unrealized_pnl": summary["unrealized_pnl"],
+                    "net_value": summary["net_value"],
+                    "starting_capital": 199.04,
+                    "total_pnl": summary["net_value"] - 199.04,
+                }
         except Exception:
             pass
 

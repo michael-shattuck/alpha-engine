@@ -9,7 +9,7 @@ from server.signals.regime import MarketRegime
 from server.signals.learner import TradeLearner
 from server.execution.orca import OrcaExecutor
 from server.execution.marginfi import MarginFiLender
-from server.execution.drift import DriftExecutor
+from server.execution.venue_router import VenueRouter
 from server.config import ORCA_WHIRLPOOL_SOL_USDC, DATABASE_URL, HELIUS_RPC_URL
 from server.persistence import TradeStore, SignalStore
 
@@ -37,7 +37,7 @@ class VolatilityScalper(BaseStrategy):
         self.learner = TradeLearner()
         self.orca: OrcaExecutor | None = None
         self.lender: MarginFiLender | None = None
-        self.drift: DriftExecutor | None = None
+        self.router: VenueRouter | None = None
         self._asset_prices: dict[str, float] = {}
         self._active_trades: list[dict] = []
         self._trade_log: list[dict] = []
@@ -50,9 +50,9 @@ class VolatilityScalper(BaseStrategy):
         self.trading_blocked: bool = False
 
     async def init_executors(self):
-        if self.mode == "live" and not self.drift:
-            self.drift = DriftExecutor(paper_mode=False)
-            await self.drift.start()
+        if self.mode == "live" and not self.router:
+            self.router = VenueRouter(paper_mode=False)
+            await self.router.start()
         if self.mode == "live" and not self.orca:
             self.orca = OrcaExecutor(paper_mode=False)
             await self.orca.start()
@@ -66,9 +66,9 @@ class VolatilityScalper(BaseStrategy):
 
         SignalEngine.load_ml_models()
 
-        if not self.drift:
-            self.drift = DriftExecutor(paper_mode=(self.mode != "live"))
-        await self.drift.start()
+        if not self.router:
+            self.router = VenueRouter(paper_mode=(self.mode != "live"))
+        await self.router.start()
 
         await self._fetch_asset_prices()
         for asset in TRACKED_ASSETS:
@@ -375,8 +375,8 @@ class VolatilityScalper(BaseStrategy):
                 log.warning(f"No price for {signal.asset}, skipping trade")
                 return None
 
-            if self.mode == "live" and self.drift and self.drift.client:
-                drift_price = self.drift.get_oracle_price(signal.asset)
+            if self.mode == "live" and self.router:
+                drift_price = self.router.get_oracle_price(signal.asset)
                 if drift_price > 0 and asset_price > 0:
                     divergence = abs(drift_price - asset_price) / asset_price
                     if divergence > 0.05:
@@ -446,7 +446,7 @@ class VolatilityScalper(BaseStrategy):
     async def _open_live_long(self, trade: dict, sol_price: float):
         asset = trade["asset"]
         size_usd = trade["size_usd"]
-        result = await self.drift.open_perp_position(asset, "long", size_usd, trade["leverage"])
+        result = await self.router.open_perp_position(asset, "long", size_usd, trade["leverage"])
         if result.get("oracle_price"):
             oracle = result["oracle_price"]
             trade["entry_price"] = oracle
@@ -459,7 +459,7 @@ class VolatilityScalper(BaseStrategy):
     async def _open_live_short(self, trade: dict, sol_price: float):
         asset = trade["asset"]
         size_usd = trade["size_usd"]
-        result = await self.drift.open_perp_position(asset, "short", size_usd, trade["leverage"])
+        result = await self.router.open_perp_position(asset, "short", size_usd, trade["leverage"])
         if result.get("oracle_price"):
             oracle = result["oracle_price"]
             trade["entry_price"] = oracle
@@ -471,16 +471,16 @@ class VolatilityScalper(BaseStrategy):
 
     async def _close_live_long(self, trade: dict, sol_price: float):
         asset = trade["asset"]
-        oracle_price = self.drift.get_oracle_price(asset)
-        result = await self.drift.close_perp_position(asset)
+        oracle_price = self.router.get_oracle_price(asset)
+        result = await self.router.close_perp_position(asset)
         if oracle_price > 0:
             trade["_exit_oracle"] = oracle_price
         log.info(f"Drift close long {asset}: oracle=${oracle_price:.6f} {result.get('status','?')}")
 
     async def _close_live_short(self, trade: dict, sol_price: float):
         asset = trade["asset"]
-        oracle_price = self.drift.get_oracle_price(asset)
-        result = await self.drift.close_perp_position(asset)
+        oracle_price = self.router.get_oracle_price(asset)
+        result = await self.router.close_perp_position(asset)
         if oracle_price > 0:
             trade["_exit_oracle"] = oracle_price
         log.info(f"Drift close short {asset}: oracle=${oracle_price:.6f} {result.get('status','?')}")

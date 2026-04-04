@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from server.strategies.base import BaseStrategy, StrategyPosition
-from server.execution.drift import DriftExecutor, MARKET_INDEX
+from server.execution.venue_router import VenueRouter, MARKET_INDEX
 
 log = logging.getLogger("funding_arb")
 
@@ -18,7 +18,7 @@ class FundingArbStrategy(BaseStrategy):
 
     def __init__(self, mode: str = "paper"):
         super().__init__(mode=mode)
-        self.drift: DriftExecutor | None = None
+        self.router: VenueRouter | None = None
         self._funding_rates: dict[str, float] = {}
         self._funding_history: list[dict] = []
         self._best_market: str = ""
@@ -26,17 +26,17 @@ class FundingArbStrategy(BaseStrategy):
         self._negative_since: float = 0.0
 
     async def init_drift(self):
-        if not self.drift:
-            self.drift = DriftExecutor(paper_mode=(self.mode != "live"))
-            await self.drift.start()
+        if not self.router:
+            self.router = VenueRouter(paper_mode=(self.mode != "live"))
+            await self.router.start()
 
     async def _fetch_funding_rates(self):
-        if not self.drift or not self.drift.client:
+        if not self.router or not self.router.client:
             return
         rates = {}
         for market in ["SOL", "BTC", "ETH", "JUP", "JTO", "SUI", "WIF", "BONK"]:
             try:
-                rate = await self.drift.get_funding_rate(market)
+                rate = await self.router.get_funding_rate(market)
                 rates[market] = rate
             except Exception:
                 pass
@@ -96,9 +96,9 @@ class FundingArbStrategy(BaseStrategy):
             pos = next((p for p in self.active_positions if p.id == action["position_id"]), None)
             if pos:
                 market = pos.metadata.get("market", "SOL")
-                if self.mode == "live" and self.drift:
+                if self.mode == "live" and self.router:
                     try:
-                        await self.drift.close_perp_position(market)
+                        await self.router.close_perp_position(market)
                         log.info(f"Closed funding arb short on {market}")
                     except Exception as e:
                         log.error(f"Failed to close funding arb: {e}")
@@ -111,9 +111,9 @@ class FundingArbStrategy(BaseStrategy):
             deposit = action["deposit_usd"]
             funding_apy = action["funding_apy"]
 
-            if self.mode == "live" and self.drift:
+            if self.mode == "live" and self.router:
                 try:
-                    result = await self.drift.open_perp_position(market, "short", deposit, 1.0)
+                    result = await self.router.open_perp_position(market, "short", deposit, 1.0)
                     log.info(f"Funding arb: short {market} ${deposit:.2f} at {funding_apy:.1f}% APY -> {result.get('status')}")
                 except Exception as e:
                     log.error(f"Failed to open funding arb: {e}")

@@ -9,7 +9,8 @@ from server.strategies.base import BaseStrategy, StrategyPosition
 from server.strategies.sse_consumer import SSEConsumer
 from server.signals.engine import SignalEngine, SignalType, TradeSignal
 from server.signals.learner import TradeLearner
-from server.execution.drift import DriftExecutor, MARKET_INDEX
+from server.execution.venue_router import VenueRouter
+from server.execution.drift import MARKET_INDEX
 from server.config import DATABASE_URL
 from server.persistence import TradeStore
 
@@ -111,7 +112,7 @@ class SmartMoneyMirror(BaseStrategy):
             asset: SignalEngine(asset=asset) for asset in TRACKED_ASSETS
         }
         self.learner = TradeLearner()
-        self.drift: DriftExecutor | None = None
+        self.router: VenueRouter | None = None
         self.sse: SSEConsumer | None = None
         self.flow = FlowAggregator()
         self._wallet_cache: dict = {}
@@ -135,8 +136,8 @@ class SmartMoneyMirror(BaseStrategy):
 
         SignalEngine.load_ml_models()
 
-        self.drift = DriftExecutor(paper_mode=(self.mode != "live"))
-        await self.drift.start()
+        self.router = VenueRouter(paper_mode=(self.mode != "live"))
+        await self.router.start()
 
         await self._fetch_asset_prices()
 
@@ -552,9 +553,9 @@ class SmartMoneyMirror(BaseStrategy):
             "status": "active",
         }
 
-        if self.mode == "live" and self.drift:
+        if self.mode == "live" and self.router:
             try:
-                result = await self.drift.open_perp_position(asset, direction, notional, leverage)
+                result = await self.router.open_perp_position(asset, direction, notional, leverage)
                 if result.get("oracle_price"):
                     trade["entry_price"] = result["oracle_price"]
                     trade["peak_price"] = result["oracle_price"]
@@ -583,9 +584,9 @@ class SmartMoneyMirror(BaseStrategy):
         trade["status"] = "closing"
         asset = trade["asset"]
 
-        if self.mode == "live" and self.drift:
+        if self.mode == "live" and self.router:
             try:
-                await self.drift.close_perp_position(asset)
+                await self.router.close_perp_position(asset)
             except Exception as e:
                 log.error(f"Mirror close failed: {e}")
 

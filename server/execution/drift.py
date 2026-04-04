@@ -223,4 +223,15 @@ class DriftExecutor:
             return 0.0
 
     def get_available_markets(self) -> list[str]:
-        return list(MARKET_INDEX.keys())
+        return [m for m in MARKET_INDEX.keys() if m not in SETTLEMENT_MARKETS and m not in ("1MBONK", "1MPEPE", "1KMEW", "1KWEN")]
+
+    def get_account_summary(self):
+        if not self.client:
+            return None
+        try:
+            user = self.client.get_user()
+            col = user.get_total_collateral() / 1e6
+            upnl = user.get_unrealized_pnl() / 1e6
+            return {"collateral": col, "unrealized_pnl": upnl, "net_value": col + upnl}
+        except Exception:
+            return None
