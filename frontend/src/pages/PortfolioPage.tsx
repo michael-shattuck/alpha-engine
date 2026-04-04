@@ -158,7 +158,7 @@ export default function PortfolioPage() {
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
           <h2 className="mb-4 text-sm font-medium tracking-wide text-gray-400 uppercase">Orca LP Positions</h2>
           <div className="space-y-3">
-            {(status.data.strategies['leveraged_lp'].positions as any[]).map((pos: any, i: number) => {
+            {((status.data?.strategies?.['leveraged_lp'] as any)?.positions as any[] ?? []).map((pos: any, i: number) => {
               const pool = pos.pool ?? ''
               const orcaUrl = pos.metadata?.position_mint && pos.metadata.position_mint !== 'none'
                 ? `https://www.orca.so/positions/${pos.metadata.position_mint}`
