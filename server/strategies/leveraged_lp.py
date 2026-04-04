@@ -582,3 +582,9 @@ class LeveragedLPStrategy(BaseStrategy):
             "actions_this_hour": self._actions_this_hour(),
             "in_cooldown": self._in_cooldown(),
         }
+
+    def load_state(self, state: dict):
+        super().load_state(state)
+        if self.mode == "live":
+            self.positions = []
+            self.status = "idle"
