@@ -4,12 +4,13 @@ import time
 import logging
 from typing import Callable, Awaitable
 
+import aiohttp
 import httpx
 
 log = logging.getLogger("sse_consumer")
 
-RECONNECT_BASE = 1
-RECONNECT_MAX = 10
+RECONNECT_DELAY = 2
+RECONNECT_MAX = 15
 
 
 class SSEConsumer:
@@ -62,37 +63,40 @@ class SSEConsumer:
         return {}
 
     async def _run(self):
-        delay = RECONNECT_BASE
+        delay = RECONNECT_DELAY
         while self._running:
             try:
-                await self._connect()
+                await self._connect_aiohttp()
+                delay = RECONNECT_DELAY
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.stats["errors"] += 1
-                log.warning(f"SSE error: {e}, reconnecting in {delay}s")
                 self.connected = False
                 self.stats["disconnects"] += 1
+                log.debug(f"SSE reconnecting in {delay}s: {str(e)[:60]}")
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, RECONNECT_MAX)
+                delay = min(delay + 1, RECONNECT_MAX)
 
-    async def _connect(self):
+    async def _connect_aiohttp(self):
         url = f"{self.base_url}/api/stream"
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5, read=30.0)) as http:
-            async with http.stream("GET", url) as response:
-                if response.status_code != 200:
-                    raise ConnectionError(f"SSE returned {response.status_code}")
+        timeout = aiohttp.ClientTimeout(total=None, connect=5, sock_read=60)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    raise ConnectionError(f"SSE returned {response.status}")
 
                 self.connected = True
                 self.stats["connects"] += 1
                 log.info(f"SSE connected to {url}")
 
                 event_type = None
-                async for line in response.aiter_lines():
+                async for line_bytes in response.content:
                     if not self._running:
                         break
 
-                    line = line.strip()
+                    line = line_bytes.decode("utf-8", errors="replace").strip()
                     if not line:
                         event_type = None
                         continue
@@ -109,7 +113,7 @@ class SSEConsumer:
                         except json.JSONDecodeError:
                             pass
                         except Exception as e:
-                            log.warning(f"SSE callback error: {e}")
+                            log.debug(f"SSE callback error: {e}")
 
         self.connected = False
         self.stats["disconnects"] += 1
