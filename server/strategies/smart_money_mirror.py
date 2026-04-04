@@ -173,14 +173,22 @@ class SmartMoneyMirror(BaseStrategy):
                             continue
                         period = TIMEFRAME_SECONDS[tf]
                         max_c = MAX_CANDLES.get(tf, 500)
-                        for c in raw[-max_c:]:
-                            candle = Candle(
-                                open=c["open"], high=c["high"], low=c["low"], close=c["close"],
-                                volume=c.get("volume", 0), timestamp=c["timestamp"],
+                        candle_list = [
+                            Candle(
+                                timestamp=c["timestamp"] / 1000, timeframe=tf,
+                                open=c["open"], high=c["high"], low=c["low"],
+                                close=c["close"], volume=c.get("volume", 0), closed=True,
+                            ) for c in raw
+                        ]
+                        engine.candles._candles[tf] = candle_list[-max_c:]
+                        if candle_list:
+                            last = candle_list[-1]
+                            engine.candles._current[tf] = Candle(
+                                timestamp=last.timestamp + period, timeframe=tf,
+                                open=last.close, high=last.close,
+                                low=last.close, close=last.close,
                             )
-                            engine.candles.buffers[tf].append(candle)
-                            engine.candles.last_candle_time[tf] = candle.timestamp
-                    engine.is_warmed_up = True
+                    engine._warmed_up = True
                     log.info(f"Warmed up mirror engine for {asset}")
                 except Exception as e:
                     log.warning(f"Mirror warmup {asset}: {e}")

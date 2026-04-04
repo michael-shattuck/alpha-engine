@@ -8,8 +8,8 @@ import httpx
 
 log = logging.getLogger("sse_consumer")
 
-RECONNECT_BASE = 2
-RECONNECT_MAX = 60
+RECONNECT_BASE = 1
+RECONNECT_MAX = 10
 
 
 class SSEConsumer:
@@ -78,7 +78,7 @@ class SSEConsumer:
 
     async def _connect(self):
         url = f"{self.base_url}/api/stream"
-        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as http:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5, read=30.0)) as http:
             async with http.stream("GET", url) as response:
                 if response.status_code != 200:
                     raise ConnectionError(f"SSE returned {response.status_code}")
