@@ -188,6 +188,8 @@ class SignalEngine:
     ML_WEIGHT = 0.4
     TF_WEIGHT = 0.6
 
+    MIN_BBW = 0.008
+
     def _evaluate_combined(self, price, acfg, now):
         tf_scores = {}
         ready_count = 0
@@ -204,6 +206,13 @@ class SignalEngine:
 
         if ready_count < 3:
             return self._no_signal(price, "warmup")
+
+        m5_for_vol = self.candles.get_closes(Timeframe.M5, 30)
+        if len(m5_for_vol) >= 20:
+            bb_l, bb_m, bb_u = ind.bollinger_bands(m5_for_vol)
+            m5_bbw = (bb_u - bb_l) / bb_m if bb_m > 0 else 0
+            if m5_bbw < self.MIN_BBW:
+                return self._no_signal(price, f"low volatility bbw={m5_bbw:.4f}")
 
         d1_closes = self.candles.get_closes(Timeframe.D1, 30)
         d1_bearish = False
