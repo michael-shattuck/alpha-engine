@@ -380,17 +380,12 @@ class FlashTradeExecutor:
         collateral_mint = Pubkey.from_string(info["collateral_mint"])
         collateral_token_acct = Pubkey.from_string(info["collateral_token_account"])
 
-        dispensing_custody = collateral_custody
-        dispensing_oracle = collateral_oracle
-        dispensing_token_acct = collateral_token_acct
-        receiving_mint = Pubkey.from_string(info["collateral_mint"])
-
         position_pda, _ = Pubkey.find_program_address(
             [b"position", bytes(wallet), bytes(market_pk)], FLASH_PROGRAM
         )
 
         receiving_ata = Pubkey.find_program_address(
-            [bytes(wallet), bytes(TOKEN_PROGRAM), bytes(receiving_mint)], ATA_PROGRAM
+            [bytes(wallet), bytes(TOKEN_PROGRAM), bytes(collateral_mint)], ATA_PROGRAM
         )[0]
 
         accounts = [
@@ -407,14 +402,9 @@ class FlashTradeExecutor:
             AccountMeta(collateral_custody, is_signer=False, is_writable=True),
             AccountMeta(collateral_oracle, is_signer=False, is_writable=False),
             AccountMeta(collateral_token_acct, is_signer=False, is_writable=True),
-            AccountMeta(dispensing_custody, is_signer=False, is_writable=True),
-            AccountMeta(dispensing_oracle, is_signer=False, is_writable=False),
-            AccountMeta(dispensing_token_acct, is_signer=False, is_writable=True),
-            AccountMeta(TOKEN_PROGRAM, is_signer=False, is_writable=False),
             AccountMeta(EVENT_AUTH_PDA, is_signer=False, is_writable=False),
             AccountMeta(FLASH_PROGRAM, is_signer=False, is_writable=False),
             AccountMeta(IX_SYSVAR, is_signer=False, is_writable=False),
-            AccountMeta(receiving_mint, is_signer=False, is_writable=False),
             AccountMeta(collateral_mint, is_signer=False, is_writable=False),
             AccountMeta(TOKEN_PROGRAM, is_signer=False, is_writable=False),
         ]
