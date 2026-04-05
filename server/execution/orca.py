@@ -1,4 +1,5 @@
 import asyncio
+import json
 import math
 import struct
 import base58
@@ -27,9 +28,31 @@ from server.config import (
     USDC_MINT,
     HELIUS_RPC_FAST,
     HELIUS_RPC_URL,
+    STATE_DIR,
 )
 
 log = logging.getLogger(__name__)
+
+MINT_KEYPAIRS_FILE = STATE_DIR / "position_mint_keypairs.json"
+
+
+def _save_mint_keypair(mint_pubkey: str, keypair_bytes: bytes):
+    keypairs = {}
+    if MINT_KEYPAIRS_FILE.exists():
+        keypairs = json.loads(MINT_KEYPAIRS_FILE.read_text())
+    keypairs[mint_pubkey] = base58.b58encode(keypair_bytes).decode()
+    MINT_KEYPAIRS_FILE.write_text(json.dumps(keypairs, indent=2))
+
+
+def _load_mint_keypair(mint_pubkey: str) -> Keypair | None:
+    if not MINT_KEYPAIRS_FILE.exists():
+        return None
+    keypairs = json.loads(MINT_KEYPAIRS_FILE.read_text())
+    encoded = keypairs.get(mint_pubkey)
+    if not encoded:
+        return None
+    return Keypair.from_bytes(base58.b58decode(encoded))
+
 
 HELIUS_RPC = HELIUS_RPC_FAST or HELIUS_RPC_URL
 WHIRLPOOL_PROGRAM_ID = Pubkey.from_string(ORCA_WHIRLPOOL_PROGRAM)
@@ -427,6 +450,9 @@ class OrcaExecutor:
         signature = str(result.value)
         log.info("open_position tx: %s", signature)
         await self._confirm_transaction(signature)
+
+        _save_mint_keypair(str(position_mint), bytes(position_mint_kp))
+        log.info("saved mint keypair for %s", position_mint)
 
         return {
             "status": "confirmed",

@@ -161,12 +161,12 @@ class SignalEngine:
     DEFAULT_CONFIG = {"sl": 0.0075, "tp": 0.015, "trail": 0.008, "hold": 3600, "thresh": 0.35}
 
     TF_WEIGHTS = {
-        Timeframe.D1: 0.10,
-        Timeframe.H4: 0.15,
-        Timeframe.H1: 0.20,
-        Timeframe.M15: 0.20,
-        Timeframe.M5: 0.20,
-        Timeframe.M1: 0.15,
+        Timeframe.D1: 0.0,
+        Timeframe.H4: 0.0,
+        Timeframe.H1: 0.15,
+        Timeframe.M15: 0.30,
+        Timeframe.M5: 0.35,
+        Timeframe.M1: 0.20,
     }
 
     def evaluate(self, current_price: float = 0) -> TradeSignal:
@@ -414,18 +414,19 @@ class SignalEngine:
             score -= 0.3
             signals.append("ema-")
 
-        if rsi > 50 and rsi < 70 and rsi > rsi_prev:
-            score += 0.2
-            signals.append(f"rsi{rsi:.0f}+")
-        elif rsi < 50 and rsi > 30 and rsi < rsi_prev:
-            score -= 0.2
-            signals.append(f"rsi{rsi:.0f}-")
+        rsi_rising = rsi > rsi_prev
+        if rsi <= 30:
+            score += 0.3
+            signals.append(f"rsi{rsi:.0f}os")
         elif rsi >= 70:
             score -= 0.3
             signals.append(f"rsi{rsi:.0f}ob")
-        elif rsi <= 30:
-            score += 0.3
-            signals.append(f"rsi{rsi:.0f}os")
+        elif rsi_rising:
+            score += 0.2
+            signals.append(f"rsi{rsi:.0f}+")
+        else:
+            score -= 0.2
+            signals.append(f"rsi{rsi:.0f}-")
 
         if velocity > 0.1:
             score += 0.2
@@ -434,11 +435,9 @@ class SignalEngine:
             score -= 0.2
             signals.append(f"v{velocity:.1f}")
 
-        if bb_pos < 0.15:
-            score += 0.3
-            signals.append(f"bb{bb_pos:.2f}")
-        elif bb_pos > 0.85:
-            score -= 0.3
+        bb_score = (0.5 - bb_pos) * 0.6
+        score += bb_score
+        if abs(bb_score) > 0.05:
             signals.append(f"bb{bb_pos:.2f}")
 
         if len(closes) >= 3:
