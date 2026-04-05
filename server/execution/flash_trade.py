@@ -389,7 +389,7 @@ class FlashTradeExecutor:
         )[0]
 
         accounts = [
-            AccountMeta(wallet, is_signer=True, is_writable=True),
+            AccountMeta(wallet, is_signer=True, is_writable=False),
             AccountMeta(wallet, is_signer=True, is_writable=True),
             AccountMeta(receiving_ata, is_signer=False, is_writable=True),
             AccountMeta(TRANSFER_AUTHORITY_PDA, is_signer=False, is_writable=False),
@@ -402,11 +402,11 @@ class FlashTradeExecutor:
             AccountMeta(collateral_custody, is_signer=False, is_writable=True),
             AccountMeta(collateral_oracle, is_signer=False, is_writable=False),
             AccountMeta(collateral_token_acct, is_signer=False, is_writable=True),
+            AccountMeta(TOKEN_PROGRAM, is_signer=False, is_writable=False),
             AccountMeta(EVENT_AUTH_PDA, is_signer=False, is_writable=False),
             AccountMeta(FLASH_PROGRAM, is_signer=False, is_writable=False),
             AccountMeta(IX_SYSVAR, is_signer=False, is_writable=False),
             AccountMeta(collateral_mint, is_signer=False, is_writable=False),
-            AccountMeta(TOKEN_PROGRAM, is_signer=False, is_writable=False),
         ]
 
         ix = Instruction(FLASH_PROGRAM, ix_data, accounts)
