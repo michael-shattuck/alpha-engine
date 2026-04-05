@@ -838,12 +838,12 @@ class SignalEngine:
         direction = position["direction"]
         peak = position.get("peak_price", position["entry_price"])
 
-        if direction == "long" and current_price > peak:
-            new_sl = current_price * (1 - trail_pct)
+        if direction == "long":
+            new_sl = peak * (1 - trail_pct)
             if new_sl > position["stop_loss"]:
                 return new_sl
-        if direction == "short" and current_price < peak:
-            new_sl = current_price * (1 + trail_pct)
+        elif direction == "short":
+            new_sl = peak * (1 + trail_pct)
             if new_sl < position["stop_loss"]:
                 return new_sl
         return None
