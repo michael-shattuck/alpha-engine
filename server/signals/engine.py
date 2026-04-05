@@ -420,52 +420,45 @@ class SignalEngine:
 
         rsi = ind.rsi(closes)
         rsi_prev = ind.rsi(closes[:-1]) if len(closes) > 15 else rsi
-        ema_9 = ind.ema(closes, 9)
-        ema_21 = ind.ema(closes, 21)
         velocity = ind.price_velocity(closes, 3)
         bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes)
         bb_pos = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper > bb_lower else 0.5
         bb_pos = max(0.0, min(1.0, bb_pos))
 
-        if ema_9 > ema_21:
-            score += 0.3
-            signals.append("ema+")
-        elif ema_9 < ema_21:
-            score -= 0.3
-            signals.append("ema-")
-
-        rsi_rising = rsi > rsi_prev
-        if rsi <= 30:
-            score += 0.3
-            signals.append(f"rsi{rsi:.0f}os")
-        elif rsi >= 70:
-            score -= 0.3
-            signals.append(f"rsi{rsi:.0f}ob")
-        elif rsi_rising:
-            score += 0.2
-            signals.append(f"rsi{rsi:.0f}+")
-        else:
-            score -= 0.2
-            signals.append(f"rsi{rsi:.0f}-")
-
-        if velocity > 0.1:
+        if velocity > 0.15:
+            score += 0.4
+            signals.append(f"v+{velocity:.1f}")
+        elif velocity > 0.05:
             score += 0.2
             signals.append(f"v+{velocity:.1f}")
-        elif velocity < -0.1:
+        elif velocity < -0.15:
+            score -= 0.4
+            signals.append(f"v{velocity:.1f}")
+        elif velocity < -0.05:
             score -= 0.2
             signals.append(f"v{velocity:.1f}")
 
-        bb_score = (0.5 - bb_pos) * 0.6
+        rsi_momentum = (rsi - 50) / 50
+        score += rsi_momentum * 0.3
+        signals.append(f"rsi{rsi:.0f}")
+
+        if rsi <= 25:
+            score += 0.2
+            signals.append("os")
+        elif rsi >= 75:
+            score -= 0.2
+            signals.append("ob")
+
+        bb_score = (0.5 - bb_pos) * 0.4
         score += bb_score
         if abs(bb_score) > 0.05:
             signals.append(f"bb{bb_pos:.2f}")
 
-        if len(closes) >= 3:
-            recent_move = (closes[-1] - closes[-3]) / closes[-3]
-            if recent_move > 0.002:
-                score += 0.15
-            elif recent_move < -0.002:
-                score -= 0.15
+        if len(closes) >= 5:
+            move_5 = (closes[-1] - closes[-5]) / closes[-5]
+            score += max(-0.3, min(0.3, move_5 * 10))
+            if abs(move_5) > 0.001:
+                signals.append(f"m{move_5*100:+.1f}%")
 
         score = max(-1.2, min(1.2, score))
         return score, "".join(signals)
