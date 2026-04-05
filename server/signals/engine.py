@@ -406,6 +406,7 @@ class SignalEngine:
         velocity = ind.price_velocity(closes, 3)
         bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes)
         bb_pos = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper > bb_lower else 0.5
+        bb_pos = max(0.0, min(1.0, bb_pos))
 
         if ema_9 > ema_21:
             score += 0.3
@@ -447,6 +448,7 @@ class SignalEngine:
             elif recent_move < -0.002:
                 score -= 0.15
 
+        score = max(-1.2, min(1.2, score))
         return score, "".join(signals)
 
     def _evaluate_trend(self, price, closes, rsi, rsi_prev, ema_9, ema_21, velocity, adx_val, tf_label, regime, assessment, long_only=False, short_only=False):
