@@ -155,13 +155,13 @@ class SignalEngine:
         return c.close if c else 0
 
     ASSET_CONFIGS = {
-        "BTC":  {"sl": 0.008, "tp": 0.016, "trail": 0.008, "hold": 3600, "thresh": 0.35},
-        "ETH":  {"sl": 0.008, "tp": 0.016, "trail": 0.008, "hold": 3600, "thresh": 0.35},
-        "SOL":  {"sl": 0.010, "tp": 0.020, "trail": 0.010, "hold": 3600, "thresh": 0.35},
-        "EUR":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 3600, "thresh": 0.35},
-        "GBP":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 3600, "thresh": 0.35},
+        "BTC":  {"sl": 0.008, "tp": 0.020, "trail": 0.008, "hold": 3600, "thresh": 0.50},
+        "ETH":  {"sl": 0.008, "tp": 0.020, "trail": 0.008, "hold": 3600, "thresh": 0.50},
+        "SOL":  {"sl": 0.010, "tp": 0.025, "trail": 0.010, "hold": 3600, "thresh": 0.50},
+        "EUR":  {"sl": 0.005, "tp": 0.012, "trail": 0.005, "hold": 3600, "thresh": 0.45},
+        "GBP":  {"sl": 0.005, "tp": 0.012, "trail": 0.005, "hold": 3600, "thresh": 0.45},
     }
-    DEFAULT_CONFIG = {"sl": 0.015, "tp": 0.030, "trail": 0.012, "hold": 3600, "thresh": 0.35}
+    DEFAULT_CONFIG = {"sl": 0.012, "tp": 0.030, "trail": 0.010, "hold": 3600, "thresh": 0.55}
 
     TF_WEIGHTS = {
         Timeframe.D1: 0.0,
@@ -188,7 +188,7 @@ class SignalEngine:
     ML_WEIGHT = 0.4
     TF_WEIGHT = 0.6
 
-    MIN_BBW = 0.008
+    MIN_BBW = 0.012
 
     def _evaluate_combined(self, price, acfg, now):
         tf_scores = {}

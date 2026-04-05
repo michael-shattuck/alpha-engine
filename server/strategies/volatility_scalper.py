@@ -16,23 +16,22 @@ from server.persistence import TradeStore, SignalStore
 log = logging.getLogger("volatility_scalper")
 
 TRACKED_ASSETS = [
-    # Majors
-    "SOL", "BTC", "ETH", "BNB",
-    # Solana DeFi
-    "JUP", "JTO", "PYTH", "RAY", "KMNO", "HYPE",
-    # Solana alts
-    "SUI", "SEI",
-    # Memecoins
-    "WIF", "BONK", "PENGU", "FARTCOIN", "TRUMP", "POPCAT", "PUMP",
-    # Stocks
-    "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN", "PLTR",
-    # Metals
-    "XAU", "XAG",
-    # Forex
+    "SOL", "BTC", "ETH",
+    "SUI", "SEI", "HYPE",
+    "JUP", "JTO", "RAY",
+    "WIF", "BONK", "PENGU", "FARTCOIN", "TRUMP",
     "EUR", "GBP",
-    # Other
-    "ZEC",
 ]
+
+LOW_FEE_ASSETS = {"SOL", "BTC", "ETH", "EUR", "GBP"}
+MID_FEE_ASSETS = {"SUI", "SEI", "HYPE", "JUP", "JTO", "RAY"}
+
+def get_leverage_for_asset(asset: str) -> float:
+    if asset in LOW_FEE_ASSETS:
+        return 3.0
+    if asset in MID_FEE_ASSETS:
+        return 2.5
+    return 2.0
 
 
 class VolatilityScalper(BaseStrategy):
@@ -392,7 +391,7 @@ class VolatilityScalper(BaseStrategy):
             "action": action,
             "signal": signal,
             "deposit_usd": size,
-            "leverage": self.MAX_LEVERAGE,
+            "leverage": get_leverage_for_asset(signal.asset),
             "reason": f"{signal.asset}: {signal.reason}",
         }
 
