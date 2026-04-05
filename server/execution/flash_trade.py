@@ -180,15 +180,15 @@ class FlashTradeExecutor:
             feed_ids = {sym: fid for sym, fid in PYTH_FEED_IDS.items() if sym in self._available_markets}
             params = [("ids[]", fid) for fid in feed_ids.values()]
             async with httpx.AsyncClient(timeout=10) as http:
-                r = await http.get("http://20.120.229.168:4160/api/latest_price_feeds", params=params)
+                r = await http.get("http://20.120.229.168:4160/v2/updates/price/latest", params=params)
                 if r.status_code == 200:
-                    feeds = r.json()
+                    data = r.json()
                     fid_to_symbol = {fid.removeprefix("0x"): sym for sym, fid in feed_ids.items()}
-                    for feed in feeds:
-                        fid = feed.get("id", "")
+                    for entry in data.get("parsed", []):
+                        fid = entry.get("id", "")
                         symbol = fid_to_symbol.get(fid)
                         if symbol:
-                            pd = feed.get("price", {})
+                            pd = entry.get("price", {})
                             price = int(pd.get("price", 0)) * (10 ** int(pd.get("expo", 0)))
                             if price > 0:
                                 self._oracle_prices[symbol] = price
