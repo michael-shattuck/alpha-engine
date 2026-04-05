@@ -155,11 +155,10 @@ class SignalEngine:
         return c.close if c else 0
 
     ASSET_CONFIGS = {
-        "JUP":  {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35},
-        "JTO":  {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35},
-        "PYTH": {"sl": 0.015, "trail": 0.015, "hold": 1800, "thresh": 0.35},
+        "BTC":  {"sl": 0.005, "tp": 0.010, "trail": 0.006, "hold": 3600, "thresh": 0.35},
+        "ETH":  {"sl": 0.005, "tp": 0.010, "trail": 0.006, "hold": 3600, "thresh": 0.35},
     }
-    DEFAULT_CONFIG = {"sl": 0.015, "trail": 0.020, "hold": 1800, "thresh": 0.35}
+    DEFAULT_CONFIG = {"sl": 0.0075, "tp": 0.015, "trail": 0.008, "hold": 3600, "thresh": 0.35}
 
     TF_WEIGHTS = {
         Timeframe.D1: 0.10,
@@ -258,6 +257,8 @@ class SignalEngine:
         ml_tag = f" ML:{ml_direction}@{ml_confidence:.0%}" if has_ml else ""
         reason_str = f"combined={combined:.2f} tf={tf_total:.2f}{ml_tag} " + ", ".join(reasons[:4])
 
+        tp_pct = acfg.get("tp", 0.015)
+
         if combined > acfg["thresh"]:
             confidence = min(0.5 + abs(combined), 0.95)
 
@@ -265,7 +266,7 @@ class SignalEngine:
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 - acfg["sl"]),
-                take_profit=price * 1.50,
+                take_profit=price * (1 + tp_pct),
                 regime="combined", trade_type="combined",
                 reason=reason_str, timestamp=now,
                 indicators={"combined": combined, "tf_score": tf_total, "ml_dir": ml_direction, "ml_conf": ml_confidence},
@@ -281,7 +282,7 @@ class SignalEngine:
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 + acfg["sl"]),
-                take_profit=price * 0.50,
+                take_profit=price * (1 - tp_pct),
                 regime="combined", trade_type="combined",
                 reason=reason_str, timestamp=now,
                 indicators={"combined": combined, "tf_score": tf_total, "ml_dir": ml_direction, "ml_conf": ml_confidence},
@@ -317,7 +318,7 @@ class SignalEngine:
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 - acfg["sl"]),
-                take_profit=price * 1.50,
+                take_profit=price * (1 + acfg.get("tp", 0.015)),
                 regime="ml", trade_type="ml",
                 reason=f"ML long conf={confidence:.2f} mag={magnitude:+.2f}%",
                 timestamp=now,
@@ -329,7 +330,7 @@ class SignalEngine:
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 + acfg["sl"]),
-                take_profit=price * 0.50,
+                take_profit=price * (1 - acfg.get("tp", 0.015)),
                 regime="ml", trade_type="ml",
                 reason=f"ML short conf={confidence:.2f} mag={magnitude:+.2f}%",
                 timestamp=now,
@@ -374,7 +375,7 @@ class SignalEngine:
                 type=SignalType.LONG, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 - acfg["sl"]),
-                take_profit=price * 1.50,
+                take_profit=price * (1 + acfg.get("tp", 0.015)),
                 regime="multi_tf", trade_type="multi_tf",
                 reason=f"score={total_score:.2f} " + ", ".join(reasons), timestamp=now,
                 indicators={"score": total_score},
@@ -386,7 +387,7 @@ class SignalEngine:
                 type=SignalType.SHORT, asset=self.asset, confidence=confidence,
                 entry_price=price,
                 stop_loss=price * (1 + acfg["sl"]),
-                take_profit=price * 0.50,
+                take_profit=price * (1 - acfg.get("tp", 0.015)),
                 regime="multi_tf", trade_type="multi_tf",
                 reason=f"score={total_score:.2f} " + ", ".join(reasons), timestamp=now,
                 indicators={"score": total_score},
