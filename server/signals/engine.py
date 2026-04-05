@@ -161,7 +161,7 @@ class SignalEngine:
         "EUR":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 3600, "thresh": 0.35},
         "GBP":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 3600, "thresh": 0.35},
     }
-    DEFAULT_CONFIG = {"sl": 0.015, "tp": 0.030, "trail": 0.012, "hold": 3600, "thresh": 0.40}
+    DEFAULT_CONFIG = {"sl": 0.015, "tp": 0.030, "trail": 0.012, "hold": 3600, "thresh": 0.35}
 
     TF_WEIGHTS = {
         Timeframe.D1: 0.0,
@@ -262,7 +262,13 @@ class SignalEngine:
 
         tp_pct = acfg.get("tp", 0.015)
 
+        m5_closes = self.candles.get_closes(Timeframe.M5, 30)
+        m5_velocity = ind.price_velocity(m5_closes, 3) if len(m5_closes) >= 5 else 0
+        m5_rsi = ind.rsi(m5_closes) if len(m5_closes) >= 15 else 50
+
         if combined > acfg["thresh"]:
+            if m5_velocity < -0.15:
+                return self._no_signal(price, f"long blocked: m5 velocity={m5_velocity:.2f} {reason_str}")
             confidence = min(0.5 + abs(combined), 0.95)
 
             return TradeSignal(
@@ -276,7 +282,8 @@ class SignalEngine:
             )
 
         if combined < -acfg["thresh"]:
-
+            if m5_velocity > 0.15:
+                return self._no_signal(price, f"short blocked: m5 velocity={m5_velocity:.2f} {reason_str}")
             confidence = min(0.5 + abs(combined), 0.95)
             if has_ml and ml_bearish:
                 confidence = min(confidence + 0.1, 0.95)
