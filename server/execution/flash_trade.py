@@ -236,7 +236,7 @@ class FlashTradeExecutor:
             return {"status": "error", "market": market, "error": f"no market config for {market} {side}"}
 
         collateral_usd = size_usd / leverage
-        oracle_exp = -9
+        oracle_exp = -8
         oracle_int = int(oracle_price * (10 ** abs(oracle_exp)))
 
         slippage = 0.02
@@ -354,7 +354,7 @@ class FlashTradeExecutor:
             return {"status": "error", "market": market, "error": f"no market config for {market} {side}"}
 
         oracle_price = self._oracle_prices.get(market, 0)
-        oracle_exp = -9
+        oracle_exp = -8
         oracle_int = int(oracle_price * (10 ** abs(oracle_exp)))
 
         slippage = 0.02
