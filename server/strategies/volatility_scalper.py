@@ -245,6 +245,11 @@ class VolatilityScalper(BaseStrategy):
             if new_sl is not None:
                 trade["stop_loss"] = new_sl
 
+            if raw_pnl < -0.02:
+                reason = f"pnl_stop ({raw_pnl*100:.1f}%)"
+                await self._close_trade(trade, price, reason, market_data)
+                continue
+
             exit_signal = engine.check_exits(trade, price)
             if exit_signal:
                 await self._close_trade(trade, price, exit_signal.reason, market_data)
