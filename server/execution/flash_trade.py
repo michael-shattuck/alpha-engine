@@ -81,21 +81,25 @@ def _get_market_info(symbol: str, side: str) -> Optional[dict]:
             for sym, c in custodies.items():
                 if c["custodyAccount"] == target_addr and sym == symbol:
                     collateral_addr = m.get("collateralCustody", "")
-                    collateral_sym = None
+                    collateral_cust = None
+                    target_cust = c
                     for cs, cc in custodies.items():
                         if cc["custodyAccount"] == collateral_addr:
-                            collateral_sym = cs
+                            collateral_cust = cc
+                    if not collateral_cust:
+                        continue
                     return {
                         "pool": pool["poolAddress"],
                         "market": m["marketAccount"],
                         "target_custody": target_addr,
                         "collateral_custody": collateral_addr,
                         "target_symbol": sym,
-                        "collateral_symbol": collateral_sym,
-                        "target_oracle": next((c.get("intOracleAddress", c.get("oracleAddress", "")) for s, c in custodies.items() if s == sym), ""),
-                        "collateral_oracle": next((c.get("intOracleAddress", c.get("oracleAddress", "")) for s, c in custodies.items() if s == collateral_sym), ""),
-                        "collateral_mint": next((c.get("mintKey", "") for s, c in custodies.items() if s == collateral_sym), ""),
-                        "collateral_token_account": next((c.get("tokenAccount", "") for s, c in custodies.items() if s == collateral_sym), ""),
+                        "target_oracle": target_cust.get("intOracleAddress", target_cust.get("oracleAddress", "")),
+                        "target_mint": target_cust.get("mintKey", ""),
+                        "target_token_account": target_cust.get("tokenAccount", ""),
+                        "collateral_oracle": collateral_cust.get("intOracleAddress", collateral_cust.get("oracleAddress", "")),
+                        "collateral_mint": collateral_cust.get("mintKey", ""),
+                        "collateral_token_account": collateral_cust.get("tokenAccount", ""),
                         "alt": pool.get("addressLookupTable", ""),
                     }
     return None
@@ -118,7 +122,7 @@ def _get_all_symbols():
 
 def _serialize_open_params(price: int, exponent: int, collateral_amount: int, size_amount: int) -> bytes:
     data = OPEN_DISC
-    data += struct.pack("<q", price)
+    data += struct.pack("<Q", price)
     data += struct.pack("<i", exponent)
     data += struct.pack("<Q", collateral_amount)
     data += struct.pack("<Q", size_amount)
@@ -128,7 +132,7 @@ def _serialize_open_params(price: int, exponent: int, collateral_amount: int, si
 
 def _serialize_close_params(price: int, exponent: int) -> bytes:
     data = CLOSE_DISC
-    data += struct.pack("<q", price)
+    data += struct.pack("<Q", price)
     data += struct.pack("<i", exponent)
     data += bytes([0])
     return data
@@ -353,6 +357,7 @@ class FlashTradeExecutor:
         if not info:
             return {"status": "error", "market": market, "error": f"no market config for {market} {side}"}
 
+        await self._fetch_prices()
         oracle_price = self._oracle_prices.get(market, 0)
         oracle_exp = -8
         oracle_int = int(oracle_price * (10 ** abs(oracle_exp)))
@@ -375,12 +380,17 @@ class FlashTradeExecutor:
         collateral_mint = Pubkey.from_string(info["collateral_mint"])
         collateral_token_acct = Pubkey.from_string(info["collateral_token_account"])
 
+        dispensing_custody = collateral_custody
+        dispensing_oracle = collateral_oracle
+        dispensing_token_acct = collateral_token_acct
+        receiving_mint = Pubkey.from_string(info["collateral_mint"])
+
         position_pda, _ = Pubkey.find_program_address(
             [b"position", bytes(wallet), bytes(market_pk)], FLASH_PROGRAM
         )
 
         receiving_ata = Pubkey.find_program_address(
-            [bytes(wallet), bytes(TOKEN_PROGRAM), bytes(collateral_mint)], ATA_PROGRAM
+            [bytes(wallet), bytes(TOKEN_PROGRAM), bytes(receiving_mint)], ATA_PROGRAM
         )[0]
 
         accounts = [
@@ -397,11 +407,16 @@ class FlashTradeExecutor:
             AccountMeta(collateral_custody, is_signer=False, is_writable=True),
             AccountMeta(collateral_oracle, is_signer=False, is_writable=False),
             AccountMeta(collateral_token_acct, is_signer=False, is_writable=True),
+            AccountMeta(dispensing_custody, is_signer=False, is_writable=True),
+            AccountMeta(dispensing_oracle, is_signer=False, is_writable=False),
+            AccountMeta(dispensing_token_acct, is_signer=False, is_writable=True),
             AccountMeta(TOKEN_PROGRAM, is_signer=False, is_writable=False),
             AccountMeta(EVENT_AUTH_PDA, is_signer=False, is_writable=False),
             AccountMeta(FLASH_PROGRAM, is_signer=False, is_writable=False),
             AccountMeta(IX_SYSVAR, is_signer=False, is_writable=False),
+            AccountMeta(receiving_mint, is_signer=False, is_writable=False),
             AccountMeta(collateral_mint, is_signer=False, is_writable=False),
+            AccountMeta(TOKEN_PROGRAM, is_signer=False, is_writable=False),
         ]
 
         ix = Instruction(FLASH_PROGRAM, ix_data, accounts)
@@ -410,8 +425,18 @@ class FlashTradeExecutor:
             cu_ix = set_compute_unit_limit(600_000)
             price_ix = set_compute_unit_price(50_000)
 
+            alts = []
+            if info.get("alt"):
+                try:
+                    alt_resp = await self._conn.get_account_info(Pubkey.from_string(info["alt"]))
+                    if alt_resp.value:
+                        alt_acct = AddressLookupTableAccount.from_bytes(bytes(alt_resp.value.data))
+                        alts.append(alt_acct)
+                except Exception:
+                    pass
+
             resp = await self._conn.get_latest_blockhash()
-            msg = MessageV0.try_compile(wallet, [cu_ix, price_ix, ix], [], resp.value.blockhash)
+            msg = MessageV0.try_compile(wallet, [cu_ix, price_ix, ix], alts, resp.value.blockhash)
             tx = VersionedTransaction(msg, [self._keypair])
 
             result = await self._conn.send_raw_transaction(bytes(tx))
