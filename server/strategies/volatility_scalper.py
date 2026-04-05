@@ -519,6 +519,49 @@ class VolatilityScalper(BaseStrategy):
             trade["_exit_oracle"] = oracle_price
         log.info(f"Drift close short {asset}: oracle=${oracle_price:.6f} {result.get('status','?')}")
 
+    TRADE_FEE_BPS = {
+        "SOL": 5.1, "BTC": 5.1, "ETH": 5.1,
+        "BNB": 10.0, "ZEC": 20.0,
+        "JUP": 11.0, "JTO": 11.0, "RAY": 11.0, "PYTH": 11.0,
+        "KMNO": 20.0,
+        "BONK": 12.0, "WIF": 12.0, "PENGU": 12.0, "FARTCOIN": 12.0,
+        "TRUMP": 12.0, "POPCAT": 12.0, "PUMP": 12.0,
+        "HYPE": 12.0, "SUI": 12.0, "SEI": 12.0,
+        "SPY": 10.0, "NVDA": 10.0, "TSLA": 10.0, "AAPL": 10.0,
+        "AMD": 10.0, "AMZN": 10.0, "PLTR": 10.0,
+        "XAU": 10.0, "XAG": 10.0,
+        "EUR": 3.0, "GBP": 3.0,
+    }
+
+    BORROW_APR = {
+        "SOL": 0.56, "BTC": 0.30, "ETH": 0.30,
+        "BNB": 0.56, "ZEC": 0.56,
+        "JUP": 1.40, "JTO": 1.40, "RAY": 1.40, "PYTH": 1.40,
+        "KMNO": 1.40,
+        "BONK": 1.40, "WIF": 1.40, "PENGU": 1.40, "FARTCOIN": 1.40,
+        "TRUMP": 1.40, "POPCAT": 1.40, "PUMP": 1.40,
+        "HYPE": 1.40, "SUI": 1.40, "SEI": 1.40,
+        "SPY": 1.40, "NVDA": 1.40, "TSLA": 1.40, "AAPL": 1.40,
+        "AMD": 1.40, "AMZN": 1.40, "PLTR": 1.40,
+        "XAU": 1.752, "XAG": 1.752,
+        "EUR": 1.752, "GBP": 1.752,
+    }
+
+    def _calc_fees(self, trade: dict) -> float:
+        asset = trade.get("asset", "SOL")
+        leverage = trade.get("leverage", 3)
+        hold_hours = (time.time() - trade.get("opened_at", time.time())) / 3600
+
+        trade_fee_bps = self.TRADE_FEE_BPS.get(asset, 12.0)
+        open_close_pct = (trade_fee_bps / 10000) * 2 * leverage
+
+        borrow_apr = self.BORROW_APR.get(asset, 1.40)
+        borrow_pct = (borrow_apr / 8760) * hold_hours * leverage
+
+        slippage_pct = 0.0005 * leverage
+
+        return open_close_pct + borrow_pct + slippage_pct
+
     async def _close_trade(self, trade: dict, exit_price: float, reason: str, market_data: dict):
         trade["status"] = "closing"
 
@@ -542,7 +585,7 @@ class VolatilityScalper(BaseStrategy):
         else:
             pnl_pct = (trade["entry_price"] - actual_exit) / trade["entry_price"] * trade["leverage"]
 
-        fee_pct = 0.0006 * 2
+        fee_pct = self._calc_fees(trade)
         pnl_pct -= fee_pct
         pnl_usd = trade["collateral_usd"] * pnl_pct
         trade["pnl_usd"] = pnl_usd

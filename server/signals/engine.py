@@ -155,10 +155,13 @@ class SignalEngine:
         return c.close if c else 0
 
     ASSET_CONFIGS = {
-        "BTC":  {"sl": 0.005, "tp": 0.010, "trail": 0.006, "hold": 3600, "thresh": 0.35},
-        "ETH":  {"sl": 0.005, "tp": 0.010, "trail": 0.006, "hold": 3600, "thresh": 0.35},
+        "BTC":  {"sl": 0.008, "tp": 0.016, "trail": 0.008, "hold": 3600, "thresh": 0.35},
+        "ETH":  {"sl": 0.008, "tp": 0.016, "trail": 0.008, "hold": 3600, "thresh": 0.35},
+        "SOL":  {"sl": 0.010, "tp": 0.020, "trail": 0.010, "hold": 3600, "thresh": 0.35},
+        "EUR":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 3600, "thresh": 0.35},
+        "GBP":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 3600, "thresh": 0.35},
     }
-    DEFAULT_CONFIG = {"sl": 0.0075, "tp": 0.015, "trail": 0.008, "hold": 3600, "thresh": 0.35}
+    DEFAULT_CONFIG = {"sl": 0.015, "tp": 0.030, "trail": 0.012, "hold": 3600, "thresh": 0.40}
 
     TF_WEIGHTS = {
         Timeframe.D1: 0.0,
