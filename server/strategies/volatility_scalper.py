@@ -16,13 +16,12 @@ from server.persistence import TradeStore, SignalStore
 log = logging.getLogger("volatility_scalper")
 
 TRACKED_ASSETS = [
-    "SOL", "BTC", "ETH", "BNB",
-    "SUI", "SEI", "HYPE",
-    "JUP", "JTO", "RAY",
-    "WIF", "BONK", "PENGU", "FARTCOIN", "TRUMP",
-    "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN", "PLTR",
+    "SOL", "BTC", "ETH",
     "XAU", "XAG", "CRUDEOIL",
-    "USDJPY", "USDCNH",
+    "USDJPY",
+    "SPY", "NVDA", "TSLA",
+    "SUI", "HYPE",
+    "WIF", "BONK",
 ]
 
 LOW_FEE_ASSETS = {"SOL", "BTC", "ETH", "EUR", "GBP", "USDJPY", "USDCNH"}

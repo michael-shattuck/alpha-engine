@@ -155,18 +155,15 @@ class SignalEngine:
         return c.close if c else 0
 
     ASSET_CONFIGS = {
-        "BTC":  {"sl": 0.008, "tp": 0.020, "trail": 0.008, "hold": 3600, "thresh": 0.35},
-        "ETH":  {"sl": 0.008, "tp": 0.020, "trail": 0.008, "hold": 3600, "thresh": 0.35},
-        "SOL":  {"sl": 0.010, "tp": 0.025, "trail": 0.010, "hold": 3600, "thresh": 0.35},
-        "EUR":  {"sl": 0.005, "tp": 0.012, "trail": 0.005, "hold": 3600, "thresh": 0.30},
-        "GBP":  {"sl": 0.005, "tp": 0.012, "trail": 0.005, "hold": 3600, "thresh": 0.30},
-        "USDJPY": {"sl": 0.005, "tp": 0.012, "trail": 0.005, "hold": 3600, "thresh": 0.30},
-        "USDCNH": {"sl": 0.005, "tp": 0.012, "trail": 0.005, "hold": 3600, "thresh": 0.30},
-        "XAU":  {"sl": 0.008, "tp": 0.020, "trail": 0.008, "hold": 3600, "thresh": 0.35},
-        "XAG":  {"sl": 0.010, "tp": 0.025, "trail": 0.010, "hold": 3600, "thresh": 0.35},
-        "CRUDEOIL": {"sl": 0.010, "tp": 0.025, "trail": 0.010, "hold": 3600, "thresh": 0.35},
+        "BTC":  {"sl": 0.006, "tp": 0.015, "trail": 0.005, "hold": 14400, "thresh": 0.35},
+        "ETH":  {"sl": 0.006, "tp": 0.015, "trail": 0.005, "hold": 14400, "thresh": 0.35},
+        "SOL":  {"sl": 0.007, "tp": 0.018, "trail": 0.006, "hold": 14400, "thresh": 0.35},
+        "USDJPY": {"sl": 0.004, "tp": 0.010, "trail": 0.004, "hold": 14400, "thresh": 0.30},
+        "XAU":  {"sl": 0.006, "tp": 0.015, "trail": 0.005, "hold": 14400, "thresh": 0.35},
+        "XAG":  {"sl": 0.007, "tp": 0.018, "trail": 0.006, "hold": 14400, "thresh": 0.35},
+        "CRUDEOIL": {"sl": 0.007, "tp": 0.018, "trail": 0.006, "hold": 14400, "thresh": 0.35},
     }
-    DEFAULT_CONFIG = {"sl": 0.012, "tp": 0.030, "trail": 0.010, "hold": 3600, "thresh": 0.40}
+    DEFAULT_CONFIG = {"sl": 0.010, "tp": 0.025, "trail": 0.008, "hold": 14400, "thresh": 0.40}
 
     TF_WEIGHTS = {
         Timeframe.D1: 0.0,
