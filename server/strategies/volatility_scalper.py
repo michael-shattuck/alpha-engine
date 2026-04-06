@@ -22,7 +22,7 @@ TRACKED_ASSETS = [
     "WIF", "BONK", "PENGU", "FARTCOIN", "TRUMP",
     "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN", "PLTR",
     "XAU", "XAG", "CRUDEOIL",
-    "EUR", "GBP", "USDJPY", "USDCNH",
+    "USDJPY", "USDCNH",
 ]
 
 LOW_FEE_ASSETS = {"SOL", "BTC", "ETH", "EUR", "GBP", "USDJPY", "USDCNH"}
