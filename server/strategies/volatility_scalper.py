@@ -140,62 +140,37 @@ class VolatilityScalper(BaseStrategy):
         if not self.engines["SOL"].is_warmed_up and price_history:
             await self.engines["SOL"].warmup(price_history)
 
-    PYTH_FEEDS = {
-        "SOL": "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
-        "BTC": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
-        "ETH": "0xc96458d393fe9deb7a7d63a0ac41e2898a67a7750dbd166673279e06c868df0a",
-        "BNB": "0x2f95862b045670cd22bee3114c39763a4a08beeb663b145d283c31d7d1101c4f",
-        "JUP": "0x0a0408d619e9380abad35060f9192039ed5042fa6f82301d0e48bb52be830996",
-        "JTO": "0xb43660a5f790c69354b0729a5ef9d50d68f1df92107540210b9cccba1f947cc2",
-        "PYTH": "0x0bbf28e9a841a1cc788f6a361b17ca072d0ea3098a1e5df1c3922d06719579ff",
-        "RAY": "0x91568baa8beb53db23eb3fb7f22c6e8bd303d103919e19733f2bb642d3e7987a",
-        "KMNO": "0xb17e5bc5de742a8a378b54c9c75442b7d51e30ada63f28d9bd28d3c0e26511a0",
-        "HYPE": "0x4279e31cc369bbcc2faf022b382b080e32a8e689ff20fbc530d2a603eb6cd98b",
-        "SUI": "0x23d7315113f5b1d3ba7a83604c44b94d79f4fd69af77f804fc7f920a6dc65744",
-        "SEI": "0x53614f1cb0c031d4af66c04cb9c756234adad0e1cee85303795091499a4084eb",
-        "WIF": "0x4ca4beeca86f0d164160323817a4e42b10010a724c2217c6ee41b54cd4cc61fc",
-        "BONK": "0x72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419",
-        "PENGU": "0xbed3097008b9b5e3c93bec20be79cb43986b85a996475589351a21e67bae9b61",
-        "FARTCOIN": "0x58cd29ef0e714c5affc44f269b2c1899a52da4169d7acc147b9da692e6953608",
-        "TRUMP": "0x879551021853eec7a7dc827578e8e69da7e4fa8148339aa0d3d5296405be4b1a",
-        "POPCAT": "0xb9312a7ee50e189ef045aa3c7842e099b061bd9bdc99ac645956c3b660dc8cce",
-        "PUMP": "0x7a01fca212788bba7c5bf8c9efd576a8a722f070d2c17596ff7bb609b8d5c3b9",
-        "SPY": "0x19e09bb805456ada3979a7d1cbb4b6d63babc3a0f8e8a9509f68afa5c4c11cd5",
-        "NVDA": "0xb1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593",
-        "TSLA": "0x2a797e196973b72447e0ab8e841d9f5706c37dc581fe66a0bd21bcd256cdb9b9",
-        "AAPL": "0x8c320e4cd87c6cef41513aead15db413cf9253211923fef6e87187a7f6688906",
-        "AMD": "0x6969003ef4c5fbb3b57a6be3883102362d05572c2dc7f72b767ad48f4206204b",
-        "AMZN": "0xb5d0e0fa58a1f8b81498ae670ce93c872d14434b72c364885d4fa1b257cbb07a",
-        "PLTR": "0x3a4c922ec7e8cd86a6fa4005827e723a134a16f4ffe836eac91e7820c61f75a1",
-        "XAU": "0x765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2",
-        "XAG": "0xf2fb02c32b055c805e7238d628e5e9dadef274376114eb1f012337cabe93871e",
-        "EUR": "0xddf7ce4fdac1084748bc5148dbaa3ca9d726000654c177a573671b1ef9feb745",
-        "GBP": "0x6f772a56b9e3f92905870f82e1116b20f8e3bade75ed98cd982d25a1982027b1",
-        "ZEC": "0xbe9b59d178f0d6a97ab4c343bff2aa69caa1eaae3e9048a65788c529b125bb24",
-    }
+    @property
+    def PYTH_FEEDS(self):
+        from server.execution.flash_trade import PYTH_FEED_IDS
+        return PYTH_FEED_IDS
 
     async def _fetch_asset_prices(self):
         import httpx
-        non_sol = {a: fid for a, fid in self.PYTH_FEEDS.items() if a != "SOL"}
-        if not non_sol:
+        tracked = set(TRACKED_ASSETS)
+        feeds = {a: fid for a, fid in self.PYTH_FEEDS.items() if a in tracked and a != "SOL"}
+        if not feeds:
             return
+        fid_to_asset = {fid.removeprefix("0x"): a for a, fid in feeds.items()}
+        fid_list = list(feeds.values())
         try:
             async with httpx.AsyncClient(timeout=10) as http:
-                params = [("ids[]", fid) for fid in non_sol.values()]
-                r = await http.get("http://20.120.229.168:4160/api/latest_price_feeds", params=params)
-                if r.status_code != 200:
-                    return
-                feeds = r.json()
-                fid_to_asset = {fid.removeprefix("0x"): a for a, fid in non_sol.items()}
-                for feed in feeds:
-                    fid = feed.get("id", "")
-                    asset = fid_to_asset.get(fid)
-                    if not asset:
+                for i in range(0, len(fid_list), 10):
+                    batch = fid_list[i:i + 10]
+                    params = [("ids[]", fid) for fid in batch]
+                    r = await http.get("http://20.120.229.168:4160/v2/updates/price/latest", params=params)
+                    if r.status_code != 200:
                         continue
-                    pd = feed.get("price", {})
-                    price = int(pd.get("price", 0)) * (10 ** int(pd.get("expo", 0)))
-                    if price > 0:
-                        self._asset_prices[asset] = price
+                    data = r.json()
+                    for entry in data.get("parsed", []):
+                        fid = entry.get("id", "")
+                        asset = fid_to_asset.get(fid)
+                        if not asset:
+                            continue
+                        pd = entry.get("price", {})
+                        price = int(pd.get("price", 0)) * (10 ** int(pd.get("expo", 0)))
+                        if price > 0:
+                            self._asset_prices[asset] = price
         except Exception:
             pass
 
