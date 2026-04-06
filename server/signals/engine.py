@@ -155,15 +155,15 @@ class SignalEngine:
         return c.close if c else 0
 
     ASSET_CONFIGS = {
-        "BTC":  {"sl": 0.006, "tp": 0.015, "trail": 0.005, "hold": 14400, "thresh": 0.35},
-        "ETH":  {"sl": 0.006, "tp": 0.015, "trail": 0.005, "hold": 14400, "thresh": 0.35},
-        "SOL":  {"sl": 0.007, "tp": 0.018, "trail": 0.006, "hold": 14400, "thresh": 0.35},
-        "USDJPY": {"sl": 0.004, "tp": 0.010, "trail": 0.004, "hold": 14400, "thresh": 0.30},
-        "XAU":  {"sl": 0.006, "tp": 0.015, "trail": 0.005, "hold": 14400, "thresh": 0.35},
-        "XAG":  {"sl": 0.007, "tp": 0.018, "trail": 0.006, "hold": 14400, "thresh": 0.35},
-        "CRUDEOIL": {"sl": 0.007, "tp": 0.018, "trail": 0.006, "hold": 14400, "thresh": 0.35},
+        "BTC":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 1800, "thresh": 0.40},
+        "ETH":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 1800, "thresh": 0.40},
+        "SOL":  {"sl": 0.006, "tp": 0.012, "trail": 0.006, "hold": 1800, "thresh": 0.40},
+        "USDJPY": {"sl": 0.003, "tp": 0.008, "trail": 0.003, "hold": 1800, "thresh": 0.35},
+        "XAU":  {"sl": 0.005, "tp": 0.010, "trail": 0.005, "hold": 1800, "thresh": 0.40},
+        "XAG":  {"sl": 0.006, "tp": 0.015, "trail": 0.006, "hold": 1800, "thresh": 0.40},
+        "CRUDEOIL": {"sl": 0.006, "tp": 0.015, "trail": 0.006, "hold": 1800, "thresh": 0.40},
     }
-    DEFAULT_CONFIG = {"sl": 0.010, "tp": 0.025, "trail": 0.008, "hold": 14400, "thresh": 0.40}
+    DEFAULT_CONFIG = {"sl": 0.008, "tp": 0.015, "trail": 0.007, "hold": 1800, "thresh": 0.45}
 
     TF_WEIGHTS = {
         Timeframe.D1: 0.0,
@@ -273,13 +273,7 @@ class SignalEngine:
 
         tp_pct = acfg.get("tp", 0.015)
 
-        m5_closes = self.candles.get_closes(Timeframe.M5, 30)
-        m5_velocity = ind.price_velocity(m5_closes, 3) if len(m5_closes) >= 5 else 0
-        m5_rsi = ind.rsi(m5_closes) if len(m5_closes) >= 15 else 50
-
         if combined > acfg["thresh"]:
-            if m5_velocity < -0.15:
-                return self._no_signal(price, f"long blocked: m5 velocity={m5_velocity:.2f} {reason_str}")
             confidence = min(0.5 + abs(combined), 0.95)
 
             return TradeSignal(
@@ -293,8 +287,6 @@ class SignalEngine:
             )
 
         if combined < -acfg["thresh"]:
-            if m5_velocity > 0.15:
-                return self._no_signal(price, f"short blocked: m5 velocity={m5_velocity:.2f} {reason_str}")
             confidence = min(0.5 + abs(combined), 0.95)
             if has_ml and ml_bearish:
                 confidence = min(confidence + 0.1, 0.95)
@@ -422,45 +414,50 @@ class SignalEngine:
 
         rsi = ind.rsi(closes)
         rsi_prev = ind.rsi(closes[:-1]) if len(closes) > 15 else rsi
+        rsi_rising = rsi > rsi_prev
         velocity = ind.price_velocity(closes, 3)
         bb_lower, bb_middle, bb_upper = ind.bollinger_bands(closes)
         bb_pos = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper > bb_lower else 0.5
         bb_pos = max(0.0, min(1.0, bb_pos))
 
-        if velocity > 0.15:
+        if rsi <= 25 and rsi_rising:
+            score += 0.6
+            signals.append(f"rsi{rsi:.0f}os+")
+        elif rsi <= 30 and rsi_rising:
             score += 0.4
-            signals.append(f"v+{velocity:.1f}")
-        elif velocity > 0.05:
+            signals.append(f"rsi{rsi:.0f}os+")
+        elif rsi <= 35:
             score += 0.2
-            signals.append(f"v+{velocity:.1f}")
-        elif velocity < -0.15:
+            signals.append(f"rsi{rsi:.0f}lo")
+        elif rsi >= 75 and not rsi_rising:
+            score -= 0.6
+            signals.append(f"rsi{rsi:.0f}ob-")
+        elif rsi >= 70 and not rsi_rising:
             score -= 0.4
-            signals.append(f"v{velocity:.1f}")
-        elif velocity < -0.05:
+            signals.append(f"rsi{rsi:.0f}ob-")
+        elif rsi >= 65:
             score -= 0.2
-            signals.append(f"v{velocity:.1f}")
+            signals.append(f"rsi{rsi:.0f}hi")
 
-        rsi_momentum = (rsi - 50) / 50
-        score += rsi_momentum * 0.3
-        signals.append(f"rsi{rsi:.0f}")
-
-        if rsi <= 25:
+        if bb_pos < 0.10:
+            score += 0.4
+            signals.append(f"bb{bb_pos:.2f}")
+        elif bb_pos < 0.25:
             score += 0.2
-            signals.append("os")
-        elif rsi >= 75:
+            signals.append(f"bb{bb_pos:.2f}")
+        elif bb_pos > 0.90:
+            score -= 0.4
+            signals.append(f"bb{bb_pos:.2f}")
+        elif bb_pos > 0.75:
             score -= 0.2
-            signals.append("ob")
-
-        bb_score = (0.5 - bb_pos) * 0.4
-        score += bb_score
-        if abs(bb_score) > 0.05:
             signals.append(f"bb{bb_pos:.2f}")
 
-        if len(closes) >= 5:
-            move_5 = (closes[-1] - closes[-5]) / closes[-5]
-            score += max(-0.3, min(0.3, move_5 * 10))
-            if abs(move_5) > 0.001:
-                signals.append(f"m{move_5*100:+.1f}%")
+        if rsi <= 35 and velocity > 0.05:
+            score += 0.3
+            signals.append("bounce")
+        elif rsi >= 65 and velocity < -0.05:
+            score -= 0.3
+            signals.append("reject")
 
         score = max(-1.2, min(1.2, score))
         return score, "".join(signals)
