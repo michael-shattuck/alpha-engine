@@ -155,24 +155,33 @@ class VolatilityScalper(BaseStrategy):
         fid_list = list(feeds.values())
         try:
             async with httpx.AsyncClient(timeout=10) as http:
-                for i in range(0, len(fid_list), 10):
-                    batch = fid_list[i:i + 10]
+                for i in range(0, len(fid_list), 5):
+                    batch = fid_list[i:i + 5]
                     params = [("ids[]", fid) for fid in batch]
-                    r = await http.get("http://20.120.229.168:4160/v2/updates/price/latest", params=params)
-                    if r.status_code != 200:
-                        continue
-                    data = r.json()
-                    for entry in data.get("parsed", []):
-                        fid = entry.get("id", "")
-                        asset = fid_to_asset.get(fid)
-                        if not asset:
+                    try:
+                        r = await http.get("http://20.120.229.168:4160/v2/updates/price/latest", params=params)
+                        if r.status_code != 200:
                             continue
-                        pd = entry.get("price", {})
-                        price = int(pd.get("price", 0)) * (10 ** int(pd.get("expo", 0)))
-                        if price > 0:
-                            self._asset_prices[asset] = price
+                        data = r.json()
+                        for entry in data.get("parsed", []):
+                            fid = entry.get("id", "")
+                            asset = fid_to_asset.get(fid)
+                            if not asset:
+                                continue
+                            pd = entry.get("price", {})
+                            price = int(pd.get("price", 0)) * (10 ** int(pd.get("expo", 0)))
+                            if price > 0:
+                                self._asset_prices[asset] = price
+                    except Exception:
+                        continue
         except Exception:
             pass
+
+        if self.router:
+            router_prices = self.router.get_oracle_prices()
+            for asset in tracked:
+                if self._asset_prices.get(asset, 0) <= 0 and router_prices.get(asset, 0) > 0:
+                    self._asset_prices[asset] = router_prices[asset]
 
     async def update(self, market_data: dict):
         sol_price = market_data.get("sol_price", 0)
