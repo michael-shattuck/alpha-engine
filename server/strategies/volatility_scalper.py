@@ -16,16 +16,17 @@ from server.persistence import TradeStore, SignalStore
 log = logging.getLogger("volatility_scalper")
 
 TRACKED_ASSETS = [
-    "SOL", "BTC", "ETH",
+    "SOL", "BTC", "ETH", "BNB",
     "SUI", "SEI", "HYPE",
     "JUP", "JTO", "RAY",
     "WIF", "BONK", "PENGU", "FARTCOIN", "TRUMP",
-    "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN",
-    "EUR", "GBP",
+    "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN", "PLTR",
+    "XAU", "XAG", "CRUDEOIL",
+    "EUR", "GBP", "USDJPY", "USDCNH",
 ]
 
-LOW_FEE_ASSETS = {"SOL", "BTC", "ETH", "EUR", "GBP"}
-MID_FEE_ASSETS = {"SUI", "SEI", "HYPE", "JUP", "JTO", "RAY", "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN"}
+LOW_FEE_ASSETS = {"SOL", "BTC", "ETH", "EUR", "GBP", "USDJPY", "USDCNH"}
+MID_FEE_ASSETS = {"SUI", "SEI", "HYPE", "JUP", "JTO", "RAY", "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN", "PLTR", "BNB", "XAU", "XAG", "CRUDEOIL", "NATGAS"}
 
 def get_leverage_for_asset(asset: str) -> float:
     if asset in LOW_FEE_ASSETS:
@@ -534,8 +535,8 @@ class VolatilityScalper(BaseStrategy):
         "HYPE": 12.0, "SUI": 12.0, "SEI": 12.0,
         "SPY": 10.0, "NVDA": 10.0, "TSLA": 10.0, "AAPL": 10.0,
         "AMD": 10.0, "AMZN": 10.0, "PLTR": 10.0,
-        "XAU": 10.0, "XAG": 10.0,
-        "EUR": 3.0, "GBP": 3.0,
+        "XAU": 10.0, "XAG": 10.0, "CRUDEOIL": 15.0,
+        "EUR": 3.0, "GBP": 3.0, "USDJPY": 3.0, "USDCNH": 3.0,
     }
 
     BORROW_APR = {
@@ -548,8 +549,8 @@ class VolatilityScalper(BaseStrategy):
         "HYPE": 1.40, "SUI": 1.40, "SEI": 1.40,
         "SPY": 1.40, "NVDA": 1.40, "TSLA": 1.40, "AAPL": 1.40,
         "AMD": 1.40, "AMZN": 1.40, "PLTR": 1.40,
-        "XAU": 1.752, "XAG": 1.752,
-        "EUR": 1.752, "GBP": 1.752,
+        "XAU": 1.752, "XAG": 1.752, "CRUDEOIL": 1.752,
+        "EUR": 1.752, "GBP": 1.752, "USDJPY": 1.752, "USDCNH": 1.752,
     }
 
     def _calc_fees(self, trade: dict) -> float:
