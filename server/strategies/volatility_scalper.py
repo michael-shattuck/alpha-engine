@@ -20,11 +20,12 @@ TRACKED_ASSETS = [
     "SUI", "SEI", "HYPE",
     "JUP", "JTO", "RAY",
     "WIF", "BONK", "PENGU", "FARTCOIN", "TRUMP",
+    "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN",
     "EUR", "GBP",
 ]
 
 LOW_FEE_ASSETS = {"SOL", "BTC", "ETH", "EUR", "GBP"}
-MID_FEE_ASSETS = {"SUI", "SEI", "HYPE", "JUP", "JTO", "RAY"}
+MID_FEE_ASSETS = {"SUI", "SEI", "HYPE", "JUP", "JTO", "RAY", "SPY", "NVDA", "TSLA", "AAPL", "AMD", "AMZN"}
 
 def get_leverage_for_asset(asset: str) -> float:
     if asset in LOW_FEE_ASSETS:
